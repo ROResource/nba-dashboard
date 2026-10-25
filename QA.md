@@ -31,3 +31,12 @@
 - No first-party JavaScript errors during browser tests. Sampled secondary-text and accent contrast ratios were at least 7.48:1.
 - Official iframe creation and start positions were verified. End-to-end audiovisual playback is provider-controlled and was not independently certified in the headless test browser.
 - GitHub Pages is the automatically updating site. The attached Perplexity preview is a snapshot, not a separately scheduled deployment.
+
+## Mobile table-scroll correction
+
+- Replaced both-axis scroll containment on stats tables with horizontal-only containment and normal vertical chaining.
+- Explicitly allowed native two-axis panning and pinch zoom; no JavaScript gesture interception.
+- Versioned the stylesheet URL to avoid reusing the old cached CSS.
+- Chromium mobile touch-input test over player rows moved the page 202px vertically.
+- Horizontal touch-input test moved the stats table 256px; a subsequent vertical swipe moved the page 203px.
+- No horizontal document overflow or first-party JavaScript errors. Date browsing, score visibility, team filtering, recap links, video selection and desktop expansion were rechecked.
