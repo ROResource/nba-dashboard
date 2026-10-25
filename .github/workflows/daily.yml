@@ -1,0 +1,94 @@
+name: Update NBA archive and deploy
+
+on:
+  schedule:
+    # UTC. Multiple passes catch delayed uploads and early/late final games.
+    - cron: '17 6,8,10,12,16 * * *'
+  push:
+    branches: [main]
+    paths:
+      - 'site/**'
+      - 'scripts/**'
+      - 'tests/**'
+      - 'requirements.txt'
+      - '.github/workflows/**'
+  workflow_dispatch:
+    inputs:
+      from:
+        description: 'Optional backfill start date (YYYY-MM-DD)'
+        type: string
+      to:
+        description: 'Optional backfill end date (YYYY-MM-DD; defaults to yesterday Eastern)'
+        type: string
+      video_limit:
+        description: 'Official channel search results per category'
+        type: string
+        default: '20'
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: nba-daily
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    outputs:
+      update_status: ${{ steps.refresh.outcome }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -v
+      - name: Refresh completed games and official videos
+        id: refresh
+        continue-on-error: true
+        env:
+          FROM_DATE: ${{ inputs.from }}
+          TO_DATE: ${{ inputs.to }}
+          VIDEO_LIMIT: ${{ inputs.video_limit || '20' }}
+        shell: bash
+        run: |
+          args=(--video-limit "$VIDEO_LIMIT")
+          if [[ -n "$FROM_DATE" ]]; then args+=(--from "$FROM_DATE"); fi
+          if [[ -n "$TO_DATE" ]]; then args+=(--to "$TO_DATE"); fi
+          python scripts/update.py "${args[@]}"
+      - name: Validate generated archive
+        run: python scripts/validate.py
+      - name: Commit archive changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add site/data
+          if ! git diff --cached --quiet; then
+            git commit -m "Update daily NBA archive"
+            git push
+          fi
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+  deploy:
+    needs: update
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+      - name: Report upstream data errors
+        if: needs.update.outputs.update_status == 'failure'
+        run: |
+          echo "::error::One or more data updates failed. Last-good data was retained and deployed. Check the update job."
+          exit 1

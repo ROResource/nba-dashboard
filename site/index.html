@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#111315">
+  <meta name="description" content="Your daily NBA catch-up. Official Top Plays, Nightly Recap chapters and completed-game box scores, archived by date.">
+  <title>NBA Daily | The night, caught up.</title>
+  <link rel="preconnect" href="https://api.fontshare.com">
+  <link href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700,900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./style.css">
+  <script src="./app.js" defer></script>
+</head>
+<body>
+  <a class="skip" href="#content">Skip to content</a>
+  <header class="topbar">
+    <a class="wordmark" href="./" aria-label="NBA Daily home">NBA<span>DAILY</span><span class="edition">THE DAILY CATCH-UP</span></a>
+    <a class="repo-link" href="https://github.com/ROResource/nba-dashboard" target="_blank" rel="noopener noreferrer">GitHub <span aria-hidden="true">↗</span></a>
+  </header>
+  <main id="content">
+    <section class="page-heading">
+      <div><p class="eyebrow">OFFICIAL HIGHLIGHTS. FINAL SCORES.</p><h1>The night, caught up.</h1></div>
+      <p id="updated" class="muted">Loading the latest edition…</p>
+    </section>
+    <section class="datebar" aria-label="Browse daily archive">
+      <div id="dates" class="dates" aria-label="Recent editions"></div>
+      <label class="calendar-label">Archive <input id="calendar" type="date" aria-label="Choose archive date"></label>
+    </section>
+    <div id="notice" role="status" hidden></div>
+    <div class="edition-heading"><h2 id="edition-date">Latest edition</h2><span id="edition-meta" class="muted"></span></div>
+    <section id="videos" class="videos" aria-label="Daily NBA videos"><div class="loading">Loading official videos…</div></section>
+    <section id="recap-chapters" class="recap-chapters" hidden aria-label="Nightly recap chapters"></section>
+    <section class="scores-section" aria-label="Completed games">
+      <div class="section-heading"><h2>Box scores</h2><div class="score-controls"><label for="team-filter" class="sr-only">Filter by team</label><select id="team-filter"><option value="">All teams</option></select><button id="spoilers" type="button" aria-pressed="false">Hide scores</button></div></div>
+      <p id="score-note" class="muted">Completed games only · NBA game dates use US Eastern time</p>
+      <div id="games" class="games"><div class="loading">Loading final scores…</div></div>
+    </section>
+    <footer>
+      <p>An independent, personal NBA catch-up. Not affiliated with the NBA.</p>
+      <p>Videos: <a href="https://www.youtube.com/@NBA" target="_blank" rel="noopener noreferrer">official NBA channel ↗</a> · Box scores: <a href="https://www.espn.com/nba/scoreboard" target="_blank" rel="noopener noreferrer">ESPN ↗</a> · <a href="https://github.com/ROResource/nba-dashboard/actions" target="_blank" rel="noopener noreferrer">Update status ↗</a></p>
+    </footer>
+  </main>
+</body>
+</html>
