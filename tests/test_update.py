@@ -37,6 +37,19 @@ class TestUpdate(unittest.TestCase):
         with self.assertRaises(ValueError):
             update.video_record('"><script>', "NBA Nightly Recap")
 
+    def test_feed_channel_without_uc_prefix(self):
+        feed = f'<feed xmlns="{update.NS["a"]}" xmlns:yt="{update.NS["yt"]}"><yt:channelId>{update.CHANNEL[2:]}</yt:channelId></feed>'
+        with patch.object(update, "get", return_value=feed):
+            self.assertEqual(update.read_feed(), [])
+
+    def test_new_youtube_description_format(self):
+        page = ('var ytInitialPlayerResponse = {"playabilityStatus":{"status":"LOGIN_REQUIRED"}};'
+                'var ytInitialData = {"contents":{"videoSecondaryInfoRenderer":'
+                '{"attributedDescription":{"content":"0:00 Wizards at Bulls\\n2:37 Heat at Hornets"}}}};')
+        video=update.video_record("7GbdkPD3oRQ", "NBA Nightly Recap | October 24, 2026")
+        with patch.object(update, "get", return_value=page):
+            self.assertEqual(update.enrich_recap(video)["chapters"][1]["seconds"],157)
+
     def test_empty_response_preserves_archive(self):
         with TemporaryDirectory() as tmp, patch.object(update, "DATA", Path(tmp)):
             original={"date":"2026-10-24","games":[{"id":"saved"}],"videos":{}}

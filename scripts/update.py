@@ -144,7 +144,10 @@ def enrich_recap(video):
                     if isinstance(node, dict):
                         renderer = node.get("videoSecondaryInfoRenderer", {})
                         runs = renderer.get("description", {}).get("runs", [])
-                        found = chapters("".join(r.get("text", "") for r in runs))
+                        description = renderer.get("attributedDescription", {}).get("content", "")
+                        if not description:
+                            description = "".join(r.get("text", "") for r in runs)
+                        found = chapters(description)
                         if found:
                             video["chapters"] = found
                             video["metadata_enriched"] = True

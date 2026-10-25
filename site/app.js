@@ -78,7 +78,7 @@ function gameCard(game) {
   return `<article class="game" data-game="${escapeHTML(game.id)}"><div class="game-top"><span>${escapeHTML(game.status.toUpperCase())}</span>${chapter?`<button type="button" data-game-chapter="${chapter.seconds}" aria-label="Watch ${escapeHTML(game.name)} in nightly recap">Watch recap ${escapeHTML(chapter.time)} ↗</button>`:""}</div><div class="team-rows">${["away","home"].map(side=>{
     const t=game[side],other=game[side==="away"?"home":"away"];
     return `<div class="team-row ${t.score<other.score?"loser":""}">${t.logo?`<img class="team-logo" src="${safeURL(t.logo)}" alt="" loading="lazy">`:""}<div class="team-name">${escapeHTML(t.name)} <small>${escapeHTML(t.record)}</small></div><span class="score">${t.score}</span></div>`;
-  }).join("")}</div><details><summary>Box score</summary><div class="box-content">${periodTable(game)}<div class="box-teams">${teamTable(game.away)}${teamTable(game.home)}</div>${outbound(game.source,"Full box score on ESPN ↗","box-source")}</div></details></article>`;
+  }).join("")}</div><details><summary>Box score</summary><div class="box-content">${periodTable(game)}<p class="table-hint">* Starter · Scroll tables for all stats</p><div class="box-teams">${teamTable(game.away)}${teamTable(game.home)}</div>${outbound(game.source,"Full box score on ESPN ↗","box-source")}</div></details></article>`;
 }
 function renderGames() {
   const games=state.day?.games||[];
