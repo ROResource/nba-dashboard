@@ -15,3 +15,19 @@
 - Python tests and cross-file data validation pass.
 - Deployed Pages URL and private preview load the current version.
 - Initial GitHub workflow completes and scheduled runs are registered.
+
+## Verification, 25 October 2026
+
+- Eight Python unit tests passed. Archive validation passed for seven dates and 36 completed games.
+- Both initial GitHub update-and-deploy runs completed successfully.
+- Public Pages site returned HTTP 200 and rendered eight games and nine recap chapters for 24 October.
+- Desktop 1440px, short-window 1440×600 and mobile 375px views checked. No document-level horizontal overflow.
+- Both player tables and quarter table rendered for an expanded game. Mobile table horizontal scrolling checked.
+- Recent-date navigation, calendar input, direct date URL, team filtering, score hiding and restoring, and rapid successive date changes checked.
+- Empty game day and missing archive date checked.
+- An intentionally failed manifest request showed a retry button; restoring access and clicking retry recovered all eight games.
+- Recap game button generated `start=157` for Heat at Hornets. Switching to Top Plays removed the previous player.
+- YouTube fallback opened the correct video in a separate tab.
+- No first-party JavaScript errors during browser tests. Sampled secondary-text and accent contrast ratios were at least 7.48:1.
+- Official iframe creation and start positions were verified. End-to-end audiovisual playback is provider-controlled and was not independently certified in the headless test browser.
+- GitHub Pages is the automatically updating site. The attached Perplexity preview is a snapshot, not a separately scheduled deployment.
