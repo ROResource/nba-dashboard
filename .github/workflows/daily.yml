@@ -2,8 +2,9 @@ name: Update NBA archive and deploy
 
 on:
   schedule:
-    # UTC. Multiple passes catch delayed uploads and early/late final games.
-    - cron: '17 6,8,10,12,16 * * *'
+    # Irish local time, including automatic summer/winter clock changes.
+    - cron: '0 7,10 * * *'
+      timezone: 'Europe/Dublin'
   push:
     branches: [main]
     paths:

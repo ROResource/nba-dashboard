@@ -14,7 +14,9 @@ A small GitHub Pages dashboard for a next-morning NBA catch-up:
 
 ## How updates work
 
-The workflow runs at **06:17, 08:17, 10:17, 12:17 and 16:17 UTC** every day. Multiple passes catch late final games and delayed video uploads. Scheduled GitHub Actions runs can be delayed by GitHub; these are not guaranteed publication times. The site shows its last update time in Europe/Dublin time.
+The workflow is scheduled for **07:00 and 10:00 Europe/Dublin** every day, with automatic summer/winter clock changes. The second pass catches late final games and delayed video uploads. Scheduled GitHub Actions runs can be delayed or dropped by GitHub; these are not guaranteed publication times. The site shows its last update time in Europe/Dublin time.
+
+Updates run entirely on GitHub. No Perplexity fallback automation is configured. If a scheduled run is missed, the next scheduled run or a manual dispatch can catch up.
 
 The default update revisits the last seven NBA game dates. It fetches only completed games, rechecks the latest two days for corrected box scores, retries missing box scores and never deletes older archive dates. Dates use **America/New_York**, not the video's UTC publication date. A video titled “October 24” belongs to October 24 even if uploaded on October 25.
 
