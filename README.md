@@ -6,6 +6,8 @@ A small GitHub Pages dashboard for a next-morning NBA catch-up:
 - Official NBA Nightly Recap, with timestamp buttons and game-specific recap links.
 - Final scores, quarter scores and expandable player box scores for both teams.
 - Recent-date buttons, full archive date picker, team filtering and a hide-scores switch.
+- Today plus the next seven game dates in a compact schedule, with Dublin/Eastern times.
+- Bottom and contextual floating box-score close buttons, plus Escape support.
 - Daily GitHub Actions updates and a permanent date-based archive.
 
 ## Website
@@ -14,13 +16,17 @@ A small GitHub Pages dashboard for a next-morning NBA catch-up:
 
 ## How updates work
 
-The workflow is scheduled for **07:00 and 10:00 Europe/Dublin** every day, with automatic summer/winter clock changes. The second pass catches late final games and delayed video uploads. Scheduled GitHub Actions runs can be delayed or dropped by GitHub; these are not guaranteed publication times. The site shows its last update time in Europe/Dublin time.
+The Raspberry Pi's external cron dispatches the existing **Update NBA archive and deploy** workflow. The workflow file is `.github/workflows/daily.yml`; its name, dispatch inputs and triggers remain unchanged by this upgrade. There is currently no native GitHub `schedule` trigger. The site shows its last update time in Europe/Dublin time.
 
-Updates run entirely on GitHub. No Perplexity fallback automation is configured. If a scheduled run is missed, the next scheduled run or a manual dispatch can catch up.
+Data processing and deployment run entirely on GitHub. No Perplexity fallback automation is configured. If an external trigger is missed, the next trigger or a manual dispatch can catch up. Pushes affecting the website, scripts, tests or workflow also trigger an update.
 
 The default update revisits the last seven NBA game dates. It fetches only completed games, rechecks the latest two days for corrected box scores, retries missing box scores and never deletes older archive dates. Dates use **America/New_York**, not the video's UTC publication date. A video titled “October 24” belongs to October 24 even if uploaded on October 25.
 
 Data lives in `site/data/days/YYYY-MM-DD.json`. `site/data/index.json` is the lightweight archive manifest. Browsers request only the selected day, not the entire season. Archives survive in the repository and Git history. New seasons do not erase previous seasons.
+
+The updater also builds `site/data/schedule.json` for today through today + seven days, using Eastern game dates regardless of archive backfill inputs. The schedule panel is initially collapsed and fetches this small snapshot only when first opened. Date/timezone switches and reopening reuse it in memory. Tip-off timestamps are stored with their timezone and displayed with explicit local dates, so games after midnight and daylight-saving changes are unambiguous. No live scores or browser sports-API requests are added.
+
+Each schedule date has its own observation time and health status. A failed refresh retains that date's previous fixtures; a date with no saved data is explicitly unavailable rather than falsely reporting no games. Stale snapshots are labelled in the UI. The schedule is not a live service, and fixtures may change between updates.
 
 The updater merges existing data, retries HTTP failures, preserves previous box scores on failure, validates the output, commits changed JSON, and deploys the `site` directory with the official Pages Actions. A partial upstream outage still deploys the last available data but marks the workflow failed, rather than silently reporting success.
 
@@ -59,4 +65,4 @@ python -m http.server 8000 --directory site
 
 GitHub Pages must use **GitHub Actions** as its build source. The workflow needs `contents: write`, `pages: write` and `id-token: write`. It commits only public JSON data. No credentials appear in the static website.
 
-The initial version deliberately does not include live scores, standings or season-stat screens.
+Standings, team season statistics and inline player season disclosures are planned next. See [the upgrade roadmap](ROADMAP.md) for scope, sequencing and acceptance criteria. Live scoring remains outside the catch-up scope.

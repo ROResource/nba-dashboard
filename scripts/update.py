@@ -247,6 +247,60 @@ def refresh_day(day, force=False):
     return failures
 
 
+def schedule_game(event):
+    """Keep only fixture metadata; never publish live scores in this panel."""
+    competition = event["competitions"][0]
+    competitors = {c["homeAway"]: c["team"] for c in competition["competitors"]}
+    status = event["status"]["type"]
+    start = event.get("date") or competition.get("date")
+    if not start or dt.datetime.fromisoformat(start.replace("Z", "+00:00")).tzinfo is None:
+        raise ValueError("Fixture start time must include a timezone")
+    return {
+        "id": str(event["id"]), "start_time": start,
+        "time_tbd": bool(competition.get("timeValid") is False or
+                         status.get("name") == "STATUS_TIME_TBD"),
+        "state": status.get("state", "pre"),
+        "status_name": status.get("name", ""),
+        "status": status.get("description", "Scheduled"),
+        "completed": bool(status.get("completed")),
+        **{side: {"id": str(competitors[side]["id"]),
+                  "name": competitors[side]["displayName"],
+                  "abbreviation": competitors[side].get("abbreviation", "")}
+           for side in ("away", "home")}}
+
+
+def refresh_schedule(today):
+    """Today plus seven days, with independent last-good fallback per date."""
+    previous = load(DATA / "schedule.json", {})
+    saved_days = {d["date"]: d for d in previous.get("days", [])}
+    days, failures = [], []
+    for offset in range(8):
+        date = (today + dt.timedelta(days=offset)).isoformat()
+        previous_day = saved_days.get(date, {})
+        try:
+            board = get(f"{API}/scoreboard?dates={date.replace('-', '')}&limit=100")
+            if not isinstance(board.get("events"), list):
+                raise ValueError("Scoreboard is missing its events array")
+            games = [schedule_game(event) for event in board["events"]]
+            if len({g["id"] for g in games}) != len(games):
+                raise ValueError("Duplicate fixture IDs")
+            if not games and previous_day.get("games"):
+                raise ValueError("Unexpected empty response; keeping saved fixtures")
+            days.append({"date": date, "checked_at": now(), "status": "ok",
+                         "games": sorted(games, key=lambda g: (g["start_time"], g["id"]))})
+        except Exception as exc:
+            failures.append(f"Schedule {date}: {exc}")
+            has_saved = isinstance(previous_day.get("games"), list)
+            days.append({"date": date, "checked_at": previous_day.get("checked_at"),
+                         "status": "stale" if has_saved else "unavailable",
+                         "games": previous_day.get("games") if has_saved else None})
+    save(DATA / "schedule.json", {
+        "schema_version": 1, "generated_at": now(), "from_date": today.isoformat(),
+        "through_date": days[-1]["date"], "game_date_timezone": "America/New_York",
+        "source": "https://www.espn.com/nba/schedule", "days": days})
+    return failures
+
+
 def run(args):
     DATA.mkdir(parents=True, exist_ok=True)
     (DATA / "days").mkdir(exist_ok=True)
@@ -256,6 +310,9 @@ def run(args):
     if end < start:
         raise ValueError("--to must not precede --from")
     problems, score_success = [], 0
+    # Schedule is always relative to today, even during an archive backfill.
+    schedule_problems = refresh_schedule(today)
+    problems.extend(schedule_problems)
     current = start
     while current <= end:
         day = current.isoformat()
@@ -321,6 +378,7 @@ def run(args):
               "sources": {"videos": FEED, "scores": f"{API}/scoreboard"},
               "health": {"scores": "ok" if score_success else "error",
                          "videos": "ok" if video_success else "error",
+                         "schedule": "error" if schedule_problems else "ok",
                          "warnings": problems},
               "last_successful_scores_at": now() if score_success else previous_index.get("last_successful_scores_at"),
               "last_successful_videos_at": now() if video_success else previous_index.get("last_successful_videos_at")}

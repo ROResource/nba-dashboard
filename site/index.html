@@ -8,8 +8,8 @@
   <title>NBA Daily | The night, caught up.</title>
   <link rel="preconnect" href="https://api.fontshare.com">
   <link href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700,900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./style.css?v=20261025-scroll">
-  <script src="./app.js" defer></script>
+  <link rel="stylesheet" href="./style.css?v=20261031-upgrades">
+  <script src="./app.js?v=20261031-upgrades" defer></script>
 </head>
 <body>
   <a class="skip" href="#content">Skip to content</a>
@@ -26,6 +26,16 @@
       <div id="dates" class="dates" aria-label="Recent editions"></div>
       <label class="calendar-label">Archive <input id="calendar" type="date" aria-label="Choose archive date"></label>
     </section>
+    <section class="schedule-section" aria-label="Upcoming NBA schedule">
+      <details id="schedule">
+        <summary><span>Today &amp; next 7 days <small>Upcoming schedule</small></span></summary>
+        <div class="schedule-content">
+          <div class="schedule-toolbar"><p id="schedule-note" class="muted" role="status">Saved daily schedule · Not live</p><label class="schedule-zone">Times <select id="schedule-zone"><option value="Europe/Dublin">Dublin</option><option value="America/New_York">US Eastern</option></select></label></div>
+          <div id="schedule-dates" class="dates" aria-label="Upcoming game dates"></div>
+          <div id="schedule-games" aria-live="polite"><div class="loading">Loading upcoming games…</div></div>
+        </div>
+      </details>
+    </section>
     <div id="notice" role="status" hidden></div>
     <div class="edition-heading"><h2 id="edition-date">Latest edition</h2><span id="edition-meta" class="muted"></span></div>
     <section id="videos" class="videos" aria-label="Daily NBA videos"><div class="loading">Loading official videos…</div></section>
@@ -40,5 +50,6 @@
       <p>Videos: <a href="https://www.youtube.com/@NBA" target="_blank" rel="noopener noreferrer">official NBA channel ↗</a> · Box scores: <a href="https://www.espn.com/nba/scoreboard" target="_blank" rel="noopener noreferrer">ESPN ↗</a> · <a href="https://github.com/ROResource/nba-dashboard/actions" target="_blank" rel="noopener noreferrer">Update status ↗</a></p>
     </footer>
   </main>
+  <button id="floating-close" class="floating-close" type="button" hidden>Close box score <span aria-hidden="true">×</span></button>
 </body>
 </html>

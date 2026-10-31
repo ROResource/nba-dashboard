@@ -3,6 +3,8 @@ const $ = s => document.querySelector(s);
 const escapeHTML = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const safeURL = value => { try { const u = new URL(value); return u.protocol === "https:" ? escapeHTML(u.href) : ""; } catch { return ""; } };
 const state = {index:null, day:null, selected:null, hidden:false, team:"", request:0};
+const scheduleState = {data:null, pending:null, selected:null};
+let floatingBox = null;
 const dateFormat = (date, options) => new Intl.DateTimeFormat("en-IE",options).format(new Date(`${date}T12:00:00Z`));
 const formatFull = date => dateFormat(date,{weekday:"long",day:"numeric",month:"long",year:"numeric"});
 const outbound = (url,text,cls="") => `<a class="${cls}" href="${safeURL(url)}" target="_blank" rel="noopener noreferrer">${text}</a>`;
@@ -78,7 +80,7 @@ function gameCard(game) {
   return `<article class="game" data-game="${escapeHTML(game.id)}"><div class="game-top"><span>${escapeHTML(game.status.toUpperCase())}</span>${chapter?`<button type="button" data-game-chapter="${chapter.seconds}" aria-label="Watch ${escapeHTML(game.name)} in nightly recap">Watch recap ${escapeHTML(chapter.time)} ↗</button>`:""}</div><div class="team-rows">${["away","home"].map(side=>{
     const t=game[side],other=game[side==="away"?"home":"away"];
     return `<div class="team-row ${t.score<other.score?"loser":""}">${t.logo?`<img class="team-logo" src="${safeURL(t.logo)}" alt="" loading="lazy">`:""}<div class="team-name">${escapeHTML(t.name)} <small>${escapeHTML(t.record)}</small></div><span class="score">${t.score}</span></div>`;
-  }).join("")}</div><details><summary>Box score</summary><div class="box-content">${periodTable(game)}<p class="table-hint">* Starter · Scroll tables for all stats</p><div class="box-teams">${teamTable(game.away)}${teamTable(game.home)}</div>${outbound(game.source,"Full box score on ESPN ↗","box-source")}</div></details></article>`;
+  }).join("")}</div><details><summary aria-label="Box score: ${escapeHTML(game.name)}">Box score</summary><div class="box-content">${periodTable(game)}<p class="table-hint">* Starter · Scroll tables for all stats</p><div class="box-teams">${teamTable(game.away)}${teamTable(game.home)}</div><div class="box-actions">${outbound(game.source,"Full box score on ESPN ↗","box-source")}<button type="button" class="box-close" data-close-box>Close box score</button></div></div></details></article>`;
 }
 function renderGames() {
   const games=state.day?.games||[];
@@ -87,7 +89,88 @@ function renderGames() {
   $("#games").innerHTML=filtered.length ? filtered.map(gameCard).join("") : `<div class="empty"><h3>${state.team?"No games for this team.":state.day.pending_games?"Games are not final yet.":"No completed games on this date."}</h3><p>${state.team?"Choose another team or date.":state.day.pending_games?"Results will appear after the next scheduled update.":"Choose another edition from the archive."}</p></div>`;
   $("#games").querySelectorAll("[data-game-chapter]").forEach(b=>b.onclick=()=>playVideo("recap",Number(b.dataset.gameChapter)));
   $("#edition-meta").textContent=`${games.length} final game${games.length===1?"":"s"} · ${state.index.days.find(d=>d.date===state.selected)?.season||""} season`;
+  updateFloatingClose();
 }
+
+function updateFloatingClose() {
+  floatingBox=null;
+  if (!state.hidden) {
+    for (const box of document.querySelectorAll("#games details[open]")) {
+      const rect=box.getBoundingClientRect();
+      if (rect.top<0 && rect.bottom>88) { floatingBox=box; break; }
+    }
+  }
+  $("#floating-close").hidden=!floatingBox;
+  if (floatingBox) $("#floating-close").setAttribute("aria-label",`Close ${floatingBox.querySelector("summary").getAttribute("aria-label")}`);
+}
+function closeBox(box) {
+  if (!box) return;
+  box.open=false;
+  const summary=box.querySelector("summary");
+  summary.focus({preventScroll:true});
+  requestAnimationFrame(()=>{
+    summary.scrollIntoView({block:"nearest",behavior:"auto"});
+    updateFloatingClose();
+  });
+}
+let closeFrame=0;
+window.addEventListener("scroll",()=>{
+  if (!closeFrame) closeFrame=requestAnimationFrame(()=>{closeFrame=0;updateFloatingClose();});
+},{passive:true});
+window.addEventListener("resize",updateFloatingClose);
+$("#games").addEventListener("toggle",updateFloatingClose,true);
+$("#games").addEventListener("click",e=>{
+  if (e.target.closest("[data-close-box]")) closeBox(e.target.closest("details"));
+});
+$("#floating-close").onclick=()=>closeBox(floatingBox);
+document.addEventListener("keydown",e=>{
+  if (e.key==="Escape") {
+    const box=e.target.closest?.("#games details[open]") || (e.target===$("#floating-close")?floatingBox:null);
+    if (box) { e.preventDefault(); closeBox(box); }
+  }
+});
+
+function renderSchedule() {
+  const data=scheduleState.data;
+  const today=new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date());
+  const stale=today!==data.from_date;
+  const updated=new Intl.DateTimeFormat("en-IE",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit",timeZone:"Europe/Dublin",timeZoneName:"short"}).format(new Date(data.generated_at));
+  $("#schedule-note").textContent=`${stale?"Saved schedule may be out of date. ":""}Updated ${updated} · Not live · Game dates: US Eastern`;
+  $("#schedule-dates").innerHTML=data.days.map(d=>`<button type="button" class="date-button" data-schedule-date="${escapeHTML(d.date)}" aria-pressed="${d.date===scheduleState.selected}"><small>${d.date===today?"Today":dateFormat(d.date,{weekday:"short"})}</small>${dateFormat(d.date,{day:"numeric",month:"short"})}</button>`).join("");
+  const day=data.days.find(d=>d.date===scheduleState.selected);
+  const zone=$("#schedule-zone").value;
+  const timeFormat=new Intl.DateTimeFormat("en-IE",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit",timeZone:zone,timeZoneName:"short"});
+  const warning=day.status!=="ok"?`<p class="schedule-footer">${day.status==="stale"?`Latest refresh failed. Last-saved fixtures checked ${escapeHTML(timeFormat.format(new Date(day.checked_at)))}.`:"Fixtures for this date could not be refreshed. The next daily update will retry."}</p>`:"";
+  $("#schedule-games").innerHTML=`<h3 class="schedule-day-heading">${formatFull(day.date)}</h3>`+(day.games?.length?`<ul class="schedule-list">${day.games.map(g=>{
+    const status=g.completed?"Completed":g.state==="in"?"In progress at update":g.status_name==="STATUS_SCHEDULED"?"":g.status;
+    return `<li class="schedule-game"><div class="schedule-matchup"><strong>${escapeHTML(g.away.name)}</strong><span>at</span><strong>${escapeHTML(g.home.name)}</strong></div><div class="schedule-time">${g.time_tbd?"Time TBD":`<time datetime="${escapeHTML(g.start_time)}">${escapeHTML(timeFormat.format(new Date(g.start_time)))}</time>`}${status?`<span>${escapeHTML(status)}</span>`:""}</div></li>`;
+  }).join("")}</ul>`:`<p class="muted">${day.games===null?"Schedule unavailable for this date.":"No NBA games scheduled for this date."}</p>`)+warning+`<p class="schedule-footer">Tip-off dates and times shown in ${zone==="Europe/Dublin"?"Dublin":"US Eastern"} time. Subject to change. ${outbound(data.source,"ESPN schedule ↗")}</p>`;
+}
+async function loadSchedule() {
+  if (scheduleState.data) { renderSchedule(); return; }
+  if (scheduleState.pending) return scheduleState.pending;
+  $("#schedule-games").innerHTML='<div class="loading">Loading upcoming games…</div>';
+  scheduleState.pending=(async()=>{
+    try {
+      const data=await readJSON("./data/schedule.json");
+      if (!Array.isArray(data.days) || !data.days.length) throw new Error("Invalid schedule");
+      scheduleState.data=data;
+      scheduleState.selected=data.days[0].date;
+      renderSchedule();
+    } catch {
+      scheduleState.data=null;
+      $("#schedule-games").innerHTML='<div class="empty"><h3>Upcoming games could not be loaded.</h3><p>The daily archive is still available below.</p><button type="button" data-retry-schedule>Try again</button></div>';
+    } finally { scheduleState.pending=null; }
+  })();
+  return scheduleState.pending;
+}
+$("#schedule").addEventListener("toggle",()=>{if ($("#schedule").open) loadSchedule();});
+$("#schedule-dates").addEventListener("click",e=>{
+  const button=e.target.closest("[data-schedule-date]");
+  if (button) { scheduleState.selected=button.dataset.scheduleDate; renderSchedule(); }
+});
+$("#schedule-games").addEventListener("click",e=>{if (e.target.closest("[data-retry-schedule]")) loadSchedule();});
+$("#schedule-zone").onchange=()=>{if (scheduleState.data) renderSchedule();};
 function renderTeamFilter() {
   const teams=[...new Map(state.day.games.flatMap(g=>[g.away,g.home]).map(t=>[t.id,t])).values()].sort((a,b)=>a.name.localeCompare(b.name));
   if (!teams.some(t=>t.id===state.team)) state.team="";

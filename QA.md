@@ -40,3 +40,17 @@
 - Chromium mobile touch-input test over player rows moved the page 202px vertically.
 - Horizontal touch-input test moved the stats table 256px; a subsequent vertical swipe moved the page 203px.
 - No horizontal document overflow or first-party JavaScript errors. Date browsing, score visibility, team filtering, recap links, video selection and desktop expansion were rechecked.
+
+## Initial upgrades, 31 October 2026
+
+- Added today plus seven further Eastern game dates. The fetched snapshot covers 31 October through 7 November, with seven fixtures on the first date.
+- Schedule payload measured 17,516 bytes uncompressed. Browser requests: zero schedule requests at initial page load, one on opening, no further requests for date/timezone switches or reopening.
+- Verified Dublin/Eastern time changes, explicit after-midnight dates, all eight date buttons and independence from the selected archive edition.
+- Verified failed-request/retry recovery and simulated empty, stale and partially unavailable schedule dates. Existing archived games remained usable.
+- Verified bottom and floating close controls, native summary toggling, Escape, and focus restoration to the correct game's summary.
+- Rechecked archive buttons, date picker, team filter, hide/show scores, video iframe selection, recap chapters/game links and outbound YouTube fallback.
+- Checked desktop 1440×900, short desktop 1440×600, mobile 375×812 and resizing desktop → mobile → desktop. No document-level horizontal overflow or first-party JavaScript errors.
+- Mobile touch panning over player tables moved the page 227px vertically and the table 216px horizontally; vertical panning still worked after horizontal panning.
+- Reviewed screenshots of the collapsed initial view, expanded schedule and mobile expanded box score with the floating close control.
+- The workflow file is unchanged byte-for-byte. It has no native GitHub schedule; the external Pi cron dispatch remains intact.
+- Standings/team stats and inline player season stats are documented in `ROADMAP.md`; they are not yet implemented.
