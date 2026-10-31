@@ -6,6 +6,10 @@ const state = {index:null, day:null, selected:null, hidden:false, team:"", reque
 const scheduleState = {data:null, pending:null, selected:null};
 const standingsState = {data:null,pending:null,view:"conference",groups:{conference:null,division:null}};
 let floatingBox = null;
+const playerCache = new Map();
+const playerSizes = new ResizeObserver(entries=>{
+  for (const {target} of entries) sizePlayerPanels(target);
+});
 const dateFormat = (date, options) => new Intl.DateTimeFormat("en-IE",options).format(new Date(`${date}T12:00:00Z`));
 const formatFull = date => dateFormat(date,{weekday:"long",day:"numeric",month:"long",year:"numeric"});
 const outbound = (url,text,cls="") => `<a class="${cls}" href="${safeURL(url)}" target="_blank" rel="noopener noreferrer">${text}</a>`;
@@ -71,19 +75,29 @@ function periodTable(game) {
   if (!count) return "";
   return `<div class="table-scroll"><table class="period-table" aria-label="Quarter scores"><thead><tr><th>Team</th>${Array.from({length:count},(_,i)=>`<th>${i<4?`Q${i+1}`:`OT${i-3}`}</th>`).join("")}<th>T</th></tr></thead><tbody>${["away","home"].map(s=>`<tr><td>${escapeHTML(game[s].abbreviation)}</td>${Array.from({length:count},(_,i)=>`<td>${game[s].periods[i]??"–"}</td>`).join("")}<td>${game[s].score}</td></tr>`).join("")}</tbody></table></div>`;
 }
-function teamTable(team) {
+function playerContext(game) {
+  const date=state.selected;
+  const fallback=Number(date.slice(0,4))+(Number(date.slice(5,7))>=7?1:0);
+  return {year:game.season_year||fallback,type:game.season_type===3?3:2};
+}
+function teamTable(team,game) {
   const cols=["MIN","PTS","REB","AST","FG","3PT","FT","STL","BLK","TO","+/-"];
-  if (!team.players.length) return `<p class="muted">Player box score pending. Retried on the next update.</p>`;
-  return `<div><h3 class="box-team-label">${escapeHTML(team.name)}</h3><div class="table-scroll"><table aria-label="${escapeHTML(team.name)} player box score"><thead><tr><th>Player</th>${cols.map(c=>`<th scope="col">${c}</th>`).join("")}</tr></thead><tbody>${team.players.map(p=>`<tr class="${p.dnp?"dnp":""}"><td>${escapeHTML(p.short_name)}${p.starter?' <span class="starter" title="Starter">*</span>':""}</td>${p.dnp?`<td colspan="${cols.length}">DNP${p.reason?`: ${escapeHTML(p.reason)}`:""}</td>`:cols.map(c=>`<td>${escapeHTML(p.stats[c]??"–")}</td>`).join("")}</tr>`).join("")}</tbody><tfoot><tr><td>TEAM</td>${cols.map(c=>`<td>${escapeHTML(team.totals[c]||"–")}</td>`).join("")}</tr></tfoot></table></div></div>`;
+  const context=playerContext(game);
+  if (!team.players?.length) return `<p class="muted">Player box score pending. Retried on the next update.</p>`;
+  return `<div><h3 class="box-team-label">${escapeHTML(team.name)}</h3><div class="table-scroll"><table aria-label="${escapeHTML(team.name)} player box score"><thead><tr><th>Player</th>${cols.map(c=>`<th scope="col">${c}</th>`).join("")}</tr></thead><tbody>${team.players.map(p=>{
+    const id=`player-${game.id}-${team.id}-${p.id}`;
+    return `<tr class="${p.dnp?"dnp":""}"><td><button type="button" id="${escapeHTML(id)}" class="player-name" data-player-id="${escapeHTML(p.id)}" data-player-year="${context.year}" data-player-type="${context.type}" data-player-panel="${escapeHTML(id)}-season" aria-expanded="false" aria-label="Season stats for ${escapeHTML(p.name)}">${escapeHTML(p.short_name||p.name)}<span class="player-chevron" aria-hidden="true">+</span></button>${p.starter?' <span class="starter" title="Starter">*</span>':""}</td>${p.dnp?`<td colspan="${cols.length}">DNP${p.reason?`: ${escapeHTML(p.reason)}`:""}</td>`:cols.map(c=>`<td>${escapeHTML(p.stats[c]??"–")}</td>`).join("")}</tr>`;
+  }).join("")}</tbody><tfoot><tr><td>TEAM</td>${cols.map(c=>`<td>${escapeHTML(team.totals[c]||"–")}</td>`).join("")}</tr></tfoot></table></div></div>`;
 }
 function gameCard(game) {
   const chapter=gameChapter(game);
   return `<article class="game" data-game="${escapeHTML(game.id)}"><div class="game-top"><span>${escapeHTML(game.status.toUpperCase())}</span>${chapter?`<button type="button" data-game-chapter="${chapter.seconds}" aria-label="Watch ${escapeHTML(game.name)} in nightly recap">Watch recap ${escapeHTML(chapter.time)} ↗</button>`:""}</div><div class="team-rows">${["away","home"].map(side=>{
     const t=game[side],other=game[side==="away"?"home":"away"];
     return `<div class="team-row ${t.score<other.score?"loser":""}">${t.logo?`<img class="team-logo" src="${safeURL(t.logo)}" alt="" loading="lazy">`:""}<div class="team-name">${escapeHTML(t.name)} <small>${escapeHTML(t.record)}</small></div><span class="score">${t.score}</span></div>`;
-  }).join("")}</div><details><summary aria-label="Box score: ${escapeHTML(game.name)}">Box score</summary><div class="box-content">${periodTable(game)}<p class="table-hint">* Starter · Scroll tables for all stats</p><div class="box-teams">${teamTable(game.away)}${teamTable(game.home)}</div><div class="box-actions">${outbound(game.source,"Full box score on ESPN ↗","box-source")}<button type="button" class="box-close" data-close-box>Close box score</button></div></div></details></article>`;
+  }).join("")}</div><details><summary aria-label="Box score: ${escapeHTML(game.name)}">Box score</summary><div class="box-content">${periodTable(game)}<p class="table-hint">* Starter · Click a player for season stats · Scroll tables for all stats</p><div class="box-teams">${teamTable(game.away,game)}${teamTable(game.home,game)}</div><div class="box-actions">${outbound(game.source,"Full box score on ESPN ↗","box-source")}<button type="button" class="box-close" data-close-box>Close box score</button></div></div></details></article>`;
 }
 function renderGames() {
+  playerSizes.disconnect();
   const games=state.day?.games||[];
   const filtered=games.filter(g=>!state.team || [g.home.id,g.away.id].includes(state.team));
   $("#games").classList.toggle("score-hidden",state.hidden);
@@ -121,15 +135,111 @@ window.addEventListener("scroll",()=>{
 window.addEventListener("resize",updateFloatingClose);
 $("#games").addEventListener("toggle",updateFloatingClose,true);
 $("#games").addEventListener("click",e=>{
+  const player=e.target.closest("[data-player-id]");
+  if (player) { togglePlayer(player); return; }
+  const action=e.target.closest("[data-close-player],[data-retry-player]");
+  if (action) {
+    const row=action.closest(".player-season-row");
+    const trigger=document.getElementById(row.dataset.trigger);
+    if (action.hasAttribute("data-close-player")) closePlayer(trigger);
+    else loadPlayerRow(trigger,row);
+    return;
+  }
   if (e.target.closest("[data-close-box]")) closeBox(e.target.closest("details"));
 });
 $("#floating-close").onclick=()=>closeBox(floatingBox);
 document.addEventListener("keydown",e=>{
   if (e.key==="Escape") {
+    const row=e.target.closest?.(".player-season-row");
+    const player=e.target.closest?.('[data-player-id][aria-expanded="true"]') ||
+      (row?document.getElementById(row.dataset.trigger):null);
+    if (player) { e.preventDefault(); closePlayer(player); return; }
     const box=e.target.closest?.("#games details[open]") || (e.target===$("#floating-close")?floatingBox:null);
     if (box) { e.preventDefault(); closeBox(box); }
   }
 });
+
+function sizePlayerPanels(wrapper) {
+  const width=wrapper.clientWidth;
+  if (width) wrapper.querySelectorAll(".player-season-panel").forEach(p=>p.style.width=`${width}px`);
+}
+function closePlayer(trigger) {
+  const row=document.getElementById(trigger.getAttribute("aria-controls"));
+  if (row) row.hidden=true;
+  trigger.setAttribute("aria-expanded","false");
+  trigger.focus({preventScroll:true});
+  requestAnimationFrame(()=>{
+    const rect=trigger.getBoundingClientRect();
+    if (rect.top<0 || rect.bottom>innerHeight) trigger.scrollIntoView({block:"nearest"});
+    updateFloatingClose();
+  });
+}
+function togglePlayer(trigger) {
+  if (trigger.getAttribute("aria-expanded")==="true") { closePlayer(trigger); return; }
+  const id=trigger.dataset.playerPanel;
+  let row=document.getElementById(id);
+  if (!row) {
+    row=document.createElement("tr");
+    row.id=id;
+    row.className="player-season-row";
+    row.dataset.trigger=trigger.id;
+    const columns=trigger.closest("table").tHead.rows[0].cells.length;
+    row.innerHTML=`<td colspan="${columns}"><div class="player-season-panel" role="region" aria-label="${escapeHTML(trigger.getAttribute("aria-label"))}" aria-live="polite"></div></td>`;
+    trigger.closest("tr").after(row);
+  }
+  row.hidden=false;
+  trigger.setAttribute("aria-controls",id);
+  trigger.setAttribute("aria-expanded","true");
+  const wrapper=row.closest(".table-scroll");
+  playerSizes.observe(wrapper);
+  sizePlayerPanels(wrapper);
+  loadPlayerRow(trigger,row);
+}
+async function readPlayer(trigger) {
+  const {playerId:id,playerYear:year,playerType:type}=trigger.dataset;
+  const key=`${year}/${type}/${id}`;
+  if (!playerCache.has(key)) {
+    const label=`${Number(year)-1}-${year.slice(-2)}`;
+    const pending=readJSON(`./data/players/${label}/${type==="3"?"playoffs":"regular"}/${id}.json`).then(data=>{
+      if (data.schema_version!==1 || data.id!==id || data.season?.year!==Number(year) ||
+          data.season.type!==Number(type) || !["ok","stale","no_stats","unavailable"].includes(data.status) ||
+          (["ok","stale"].includes(data.status) && !Number.isInteger(data.stats?.gp))) throw new Error("Invalid player snapshot");
+      return data;
+    }).catch(error=>{playerCache.delete(key);throw error;});
+    playerCache.set(key,pending);
+  }
+  return playerCache.get(key);
+}
+async function loadPlayerRow(trigger,row) {
+  const panel=row.querySelector(".player-season-panel");
+  const playerName=trigger.getAttribute("aria-label").replace(/^Season stats for /,"");
+  const close=`<button type="button" class="player-season-close" data-close-player aria-label="Close ${escapeHTML(playerName)} season stats">×</button>`;
+  const label=`${Number(trigger.dataset.playerYear)-1}-${trigger.dataset.playerYear.slice(-2)} ${trigger.dataset.playerType==="3"?"playoff":"regular-season"} averages`;
+  panel.innerHTML=`<div class="player-season-heading"><p>${escapeHTML(label)}</p>${close}</div><p class="muted">Loading season stats…</p>`;
+  try {
+    const data=await readPlayer(trigger);
+    if (!row.isConnected) return;
+    const heading=`<div class="player-season-heading"><div><strong>${escapeHTML(data.name)}</strong><p class="muted">${escapeHTML(label)}</p></div>${close}</div>`;
+    if (!data.stats) {
+      panel.innerHTML=heading+`<p class="player-season-note">${data.status==="no_stats"?"No statistics have been published for this player in this season and competition.":"Season stats could not be refreshed. The next daily update will retry."} ${outbound(data.source,"ESPN ↗")}</p>`;
+    } else {
+      const fields=[["GP","gp"],["MPG","mpg"],["PPG","ppg"],["RPG","rpg"],["APG","apg"],["SPG","spg"],["BPG","bpg"],["TOV","tov"],["FG%","fg_pct"],["3P%","three_pct"],["FT%","ft_pct"]];
+      const stats=fields.map(([title,key])=>{
+        const value=data.stats[key];
+        const text=Number.isFinite(value)?(key==="gp"?String(value):value.toFixed(1))+(key.endsWith("_pct")?"%":""):'<span aria-label="Unavailable">–</span>';
+        return `<div><dt>${title}</dt><dd>${text}</dd></div>`;
+      }).join("");
+      const checked=new Intl.DateTimeFormat("en-IE",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit",timeZone:"Europe/Dublin",timeZoneName:"short"}).format(new Date(data.checked_at));
+      panel.innerHTML=heading+`<dl class="player-season-stats">${stats}</dl><p class="player-season-note">${data.status==="stale"?"Refresh failed; showing last-saved averages. ":""}All teams · Checked ${escapeHTML(checked)} · Season snapshot, not as of this game. ${outbound(data.source,"ESPN ↗")}</p>`;
+    }
+  } catch {
+    if (row.isConnected) panel.innerHTML=`<div class="player-season-heading"><p>${escapeHTML(label)}</p>${close}</div><p class="player-season-note">Season stats could not be loaded. <button type="button" class="player-retry" data-retry-player>Try again</button></p>`;
+  }
+  if (row.isConnected) {
+    sizePlayerPanels(row.closest(".table-scroll"));
+    requestAnimationFrame(updateFloatingClose);
+  }
+}
 
 function renderSchedule() {
   const data=scheduleState.data;

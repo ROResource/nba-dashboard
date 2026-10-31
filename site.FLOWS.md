@@ -33,3 +33,15 @@
 - Failed request/retry, unavailable snapshot, stale source and older saved timestamps are labelled. Supplementary failure must not stop archive updates.
 - Desktop/mobile screenshots, sticky team names, horizontal/vertical touch scrolling, keyboard controls, overflow and console checks.
 - Recheck all existing schedule/archive/video/filter/spoiler/box-score close flows and keep workflow byte-for-byte unchanged.
+
+## Inline player season stats acceptance checks
+
+- Player name is a native button with expanded state and a unique controlled row, including DNP players. No player request before a click.
+- First click inserts a compact inline row directly below the player, within that team's table. Close/reopen is immediate and uses the session cache.
+- Duplicate views of the same player/season/type share a pending request and cached response. Archived seasons and playoffs have distinct cache/file keys.
+- Show explicit season, regular season/playoff context, GP, MPG, PPG, RPG, APG, SPG, BPG, turnovers and shooting percentages. Use combined all-team averages for trades, never add rounded averages.
+- Season averages are full-season-to-date snapshots, not statistics as of the archived game date. Preseason games reference clearly labelled regular-season averages.
+- Empty/DNP, stale, unavailable and network error/retry states stay inside the row. Changing dates or hiding scores during a pending request must not modify another table.
+- Escape first closes the focused player disclosure and returns focus to its name; a second Escape can close the box score. Existing bottom/floating close controls still work.
+- Mobile inline content stays within the visible table viewport while panning; vertical page scrolling, horizontal table scrolling, resize and sticky sizing remain usable.
+- Regression-check schedule, standings, filters, score hiding, archive/calendar, video/chapter controls, box closing and console errors. Workflow remains unchanged.

@@ -9,6 +9,7 @@ A small GitHub Pages dashboard for a next-morning NBA catch-up:
 - Today plus the next seven game dates in a compact schedule, with Dublin/Eastern times.
 - Bottom and contextual floating box-score close buttons, plus Escape support.
 - League, conference and division standings with team records, last ten, streak and points per game.
+- Inline player season averages beneath each clicked name, including DNP player disclosures and keyboard controls.
 - Daily GitHub Actions updates and a permanent date-based archive.
 
 ## Website
@@ -32,6 +33,14 @@ Each schedule date has its own observation time and health status. A failed refr
 `site/data/standings.json` is a separate current regular-season snapshot, requested only when its collapsed panel is opened. League, conference and division views, group selection, team search and statistic sorting run locally without more requests. Conference order uses provider ranks; division order preserves those ranks within provider-sourced division membership. League order is a win-percentage comparison, not official playoff seeding. Division games-behind is calculated within the selected division; conference GB is provider-sourced, and league GB is omitted.
 
 Team season columns include W-L, win percentage, last ten, streak, points for/against per game and average point differential. Differential is not net rating. Missing optional figures are unavailable rather than zero. Standings reflect the current provider season, not the selected archived date, and respect the existing Hide scores control. Failed or incomplete source responses preserve the last-good snapshot and its observation time. No new scheduler, workflow inputs, credentials or browser sports-API calls are introduced.
+
+Player data lives in `site/data/players/{season}/regular/{playerId}.json` or the corresponding `playoffs` directory. Clicking a player's name opens a small inline row containing games played, minutes, points, rebounds, assists, steals, blocks, turnovers and shooting percentages. The browser loads only that player's static file and shares its pending request/result across all instances in the session. No player requests occur at initial load or merely when opening a game.
+
+The displayed figures are labelled season snapshots, not stats reconstructed as of an archived game date. Provider scoreboard metadata selects playoff context; older files without phase metadata and preseason games use clearly labelled regular-season averages. Traded players use the provider's combined all-team season row. Shooting percentages retain the provider's 0–100 scale.
+
+The updater bootstraps archived player contexts using at most four concurrent requests. Subsequent runs refresh new appearances, retry missing data after a one-hour cooldown, and recheck current-season snapshots weekly for corrections. It rejects season GP counts behind completed archived appearances and preserves last-good data on failure. A no-published-stats message is distinct from a failed request; neither produces fabricated zero averages. The browser supports local network retry, instant close/reopen, accessible expanded state, focus restoration and Escape. On mobile the inline panel stays visible while the enclosing box score pans.
+
+To protect the daily update during a provider outage, no new player requests start after a three-minute batch budget. Requests already in flight retain the existing bounded timeouts. Deferred contexts keep last-good figures or an explicit unavailable placeholder, and warning lists are capped to keep the archive manifest small.
 
 The updater merges existing data, retries HTTP failures, preserves previous box scores on failure, validates the output, commits changed JSON, and deploys the `site` directory with the official Pages Actions. A partial upstream outage still deploys the last available data but marks the workflow failed, rather than silently reporting success.
 
@@ -70,4 +79,4 @@ python -m http.server 8000 --directory site
 
 GitHub Pages must use **GitHub Actions** as its build source. The workflow needs `contents: write`, `pages: write` and `id-token: write`. It commits only public JSON data. No credentials appear in the static website.
 
-Inline player season disclosures are planned next. See [the upgrade roadmap](ROADMAP.md) for scope, sequencing and acceptance criteria. Live scoring remains outside the catch-up scope.
+All four requested upgrades are implemented. See [the upgrade roadmap](ROADMAP.md) for delivery details and guardrails. Live scoring remains outside the catch-up scope.

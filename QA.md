@@ -74,3 +74,20 @@
 - Workflow file `.github/workflows/daily.yml` remains byte-for-byte unchanged, including name, triggers and dispatch inputs.
 - [Standings release workflow 41192150519](https://github.com/ROResource/nba-dashboard/actions/runs/41192150519) completed successfully and the new version was verified on GitHub Pages.
 - Fresh-context hosted checks passed on both GitHub Pages and the existing preview: all three standings views, groups, search/sort, spoiler behavior, one-request loading, schedule, archive/calendar, team filter, box-score closing, video loading and 375px layout. No first-party JavaScript errors.
+
+## Inline player statistics upgrade, 31 October 2026
+
+- All 39 Python tests passed. New coverage includes per-game versus career rows, season/competition separation, traded-player combined rows, percentage scale, zero/missing/invalid values, DNP/preseason handling, incremental refresh, weekly correction, last-good fallback, GP lag detection, retry cooldown and request-budget deferral.
+- Generated-data validation passed for the existing archive/schedule/standings and 457 player-season snapshots. At bootstrap, 430 contained figures, 25 had no published season stats and two had provider season rows not yet caught up with completed games. The latter are explicitly unavailable and retried automatically, not populated with career figures or invented zeros.
+- Player JSON payloads averaged 461 bytes, with a largest file of 480 bytes; the complete 457-file bootstrap was 210,576 bytes uncompressed. None of these files is loaded at initial page load or merely when opening a game.
+- First click makes one static player request; close/reopen uses the session cache. Verified pending-request sharing across close/reopen and archive navigation, and safe handling when the archive changes or scores are hidden before the response arrives.
+- Verified that each row is directly beneath its player, spans the existing table columns and displays all 11 requested fields with 0–100 percentage formatting.
+- Source spot-check: the rendered Moussa Diabate season row agrees with [ESPN's regular-season averages](https://www.espn.com/nba/player/stats/_/id/4433249), including 6 GP, 29.7 MPG, 9.3 PPG, 9.8 RPG, 1.8 APG and 62.2% FG.
+- Tested real DNP-name activation, local request error/retry, missing percentage, no-published-stats and unavailable messages, plus stale data with its original observation timestamp.
+- Synthetic season/phase fixtures confirmed separate `2025-26/playoffs` and `2026-27/regular` requests/cache keys for the same player. Production averages are season snapshots, not reconstructed as of an archived game date.
+- Enter and Space open the disclosure. Close returns focus to the player; Escape closes the player row first, then the box score. All rendered ARIA control references point to existing rows.
+- Reviewed desktop and 375×812 mobile screenshots. Metrics reflow without overlap; the panel stays within the visible table viewport while panning.
+- Mobile touch tests moved the table 231px horizontally and the page 195px vertically over the inline panel. The panel's left edge remained at x=33px. Closing, 1440×600 short-window layout and desktop/mobile resizing passed without document-level horizontal overflow.
+- Rechecked schedule dates/timezones, all standings views, search/sort, score hiding, team filtering, archive/calendar, bottom/floating/Escape box closing, video selection and recap chapters/game links. These flows made zero incidental player requests. No first-party JavaScript errors.
+- Player refresh concurrency is capped at four. New requests stop starting after a three-minute batch budget, with bounded in-flight timeouts and explicit deferred states. Warning lists are capped to keep the archive manifest small.
+- Workflow file `.github/workflows/daily.yml` remains byte-for-byte unchanged, including name, filename, inputs and triggers.

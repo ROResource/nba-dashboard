@@ -3,6 +3,7 @@ import json
 import re
 import datetime as dt
 import math
+from update import player_targets, player_season_path
 from pathlib import Path
 
 data = Path(__file__).resolve().parents[1] / "site" / "data"
@@ -98,3 +99,34 @@ else:
         if all(stats[key] is not None for key in ("points_for", "points_against", "point_diff")):
             assert abs(stats["points_for"] - stats["points_against"] - stats["point_diff"]) <= .21
 print(f"Validated standings snapshot: {standings['status']}.")
+
+player_count = 0
+player_statuses = {}
+targets = list(player_targets([json.loads(p.read_text()) for p in sorted((data / "days").glob("*.json"))]))
+for target in targets:
+    path = player_season_path(target["year"], target["type"], target["id"])
+    player = json.loads(path.read_text())
+    assert player["schema_version"] == 1 and player["id"] == target["id"]
+    assert player["season"] == {"year": target["year"],
+                                "label": f"{target['year'] - 1}-{str(target['year'])[-2:]}",
+                                "type": target["type"]}
+    assert player["scope"] == "all_teams"
+    assert player["source"] == f"https://www.espn.com/nba/player/stats/_/id/{target['id']}"
+    assert player["status"] in ("ok", "stale", "no_stats", "unavailable")
+    dt.datetime.fromisoformat(player["generated_at"])
+    dt.date.fromisoformat(player["archive_through"])
+    assert isinstance(player["archive_gp"], int) and player["archive_gp"] >= 0
+    if player["status"] in ("ok", "stale"):
+        dt.datetime.fromisoformat(player["checked_at"])
+        stats = player["stats"]
+        assert isinstance(stats["gp"], int) and stats["gp"] > 0
+        for key in ("mpg", "ppg", "rpg", "apg", "spg", "bpg", "tov", "fg_pct", "three_pct", "ft_pct"):
+            value = stats[key]
+            assert value is None or (isinstance(value, (int, float)) and math.isfinite(value) and value >= 0)
+            if key.endswith("_pct") and value is not None:
+                assert value <= 100, "Shooting percentages use a 0-100 scale"
+    else:
+        assert player["stats"] is None
+    player_count += 1
+    player_statuses[player["status"]] = player_statuses.get(player["status"], 0) + 1
+print(f"Validated {player_count} player-season snapshots: {player_statuses}.")

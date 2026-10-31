@@ -31,7 +31,7 @@ The goal is a streamlined daily catch-up: static prebuilt data, immediate local 
 - The existing Hide scores control also hides standings. Opening standings while scores are hidden makes no request.
 - Two source requests per daily update produce one validated 30-team snapshot; incomplete, duplicate, wrong-season and inconsistent data preserve the entire last-good snapshot with an explicit stale label.
 
-## Next: inline player season statistics
+## Delivered: inline player season statistics
 
 - Make a player name a keyboard-operable disclosure control; insert a slim detail row directly below that player.
 - Start with GP, MPG, PPG, RPG, APG, SPG, BPG, turnovers and FG/3P/FT percentages.
@@ -40,6 +40,20 @@ The goal is a streamlined daily catch-up: static prebuilt data, immediate local 
 - Fetch only on first expansion, deduplicate concurrent requests, cache in memory and allow instant close/reopen.
 - Refresh active players incrementally with bounded concurrency. Add a full refresh only if necessary without altering existing dispatch inputs or requiring a second scheduler.
 - Acceptance: source-checked averages, correct percentage formatting, empty/error/retry handling, accessible expanded state, no table misalignment and smooth mobile panning.
+
+### Implementation
+
+- Player names are native disclosure buttons. Clicking inserts a compact row immediately beneath that player, without navigation or a new tab.
+- Includes GP, MPG, PPG, RPG, APG, SPG, BPG, turnovers and FG/3P/FT percentages. Each row labels the season and regular-season/playoff context.
+- Separate season/competition files preserve historical context. Scoreboard metadata identifies postseason games; older archive files without that metadata use explicitly labelled regular-season averages. Preseason games also reference regular-season averages, not preseason figures.
+- Averages are season snapshots, not reconstructed statistics as of the archived game date. Traded players use the provider's combined all-team row.
+- Tiny static player files load only on demand. Pending requests and completed responses are shared across games and archive dates for the same player/season/type.
+- The updater uses four concurrent requests at most. First fill covers archived players; later runs refresh new appearances, retry failed data and perform weekly current-season correction checks.
+- New player requests stop starting after a three-minute batch budget; in-flight requests retain the existing bounded HTTP timeouts. Deferred players keep last-good figures or an explicit unavailable placeholder, rather than holding up the archive indefinitely.
+- GP checks reject provider rows that have not caught up with completed archived appearances. Last-good figures retain their observation time and get an explicit stale label.
+- Players with no published stats receive an empty-state message, not fabricated zeros. Missing files/network failures get a local retry, without affecting the box score.
+- Keyboard support includes Enter/Space, explicit expanded state, close/focus restoration and Escape to close the player row before the parent box score.
+- The inline panel stays within the visible table viewport while panning and resizes without new requests. Existing box-score closing and score-hiding behavior is retained.
 
 ## Release and performance guardrails
 
@@ -53,3 +67,5 @@ The goal is a streamlined daily catch-up: static prebuilt data, immediate local 
 ## Intentionally outside this roadmap
 
 Live scoring, betting features, complex advanced-stat dashboards and new notifications are not part of the requested catch-up experience.
+
+All four requested feature upgrades are now implemented. Further feature work should follow real-use feedback; routine data-provider and workflow dependency maintenance must retain the existing dispatch contract.

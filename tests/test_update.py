@@ -86,6 +86,7 @@ class TestUpdate(unittest.TestCase):
                                    days=7, skip_discovery=True, video_limit=20)
             with patch.object(update, "refresh_schedule", return_value=["Schedule offline"]) as schedule, \
                  patch.object(update, "refresh_standings", return_value=["Standings offline"]), \
+                 patch.object(update, "refresh_players", return_value=["Player offline"]), \
                  patch.object(update, "refresh_day", return_value=[]), \
                  patch.object(update, "read_feed", return_value=[]):
                 self.assertEqual(update.run(args), 1)
@@ -94,6 +95,7 @@ class TestUpdate(unittest.TestCase):
             index = update.load(Path(tmp) / "index.json")
             self.assertEqual(index["health"]["schedule"], "error")
             self.assertEqual(index["health"]["standings"], "error")
+            self.assertEqual(index["health"]["players"], "error")
             self.assertEqual(index["health"]["scores"], "ok")
             self.assertEqual(index["health"]["videos"], "ok")
             self.assertEqual(index["days"][0]["date"], "2026-10-20")
@@ -260,6 +262,194 @@ class TestStandings(unittest.TestCase):
             saved = update.load(Path(tmp) / "standings.json")
             self.assertEqual(saved["status"], "unavailable")
             self.assertIsNone(saved["checked_at"])
+
+
+class TestPlayerSeasons(unittest.TestCase):
+    def payload(self, year=2027, phase=2, gp="5"):
+        return {"categories": [{
+            "displayName": "Postseason Averages" if phase == 3 else "Regular Season Averages",
+            "names": ["gamesPlayed", "avgMinutes", "avgPoints", "avgRebounds", "avgAssists",
+                      "avgSteals", "avgBlocks", "avgTurnovers", "fieldGoalPct",
+                      "threePointFieldGoalPct", "freeThrowPct"],
+            "statistics": [{"season": {"year": year}, "teamId": "2", "teamSlug": "team",
+                            "stats": [gp, "32.1", "24.2", "7.0", "4.3", "0.0", "1.0", "2.1",
+                                      "46.4", "0.0", "88.9"]}]}]}
+
+    def target(self):
+        return {"year": 2027, "type": 2, "id": "1", "name": "Example Player",
+                "through": "2026-10-30", "played": {"g1": "2026-10-30"}}
+
+    def days(self):
+        player = {"id": "1", "name": "Example Player", "dnp": False, "stats": {"MIN": "20"}}
+        return [{"date": "2026-10-30", "games": [{
+            "id": "g1", "season_year": 2027, "season_type": 2,
+            "away": {"players": [player]}, "home": {"players": []}}]}]
+
+    def test_player_season_values_and_percent_scale(self):
+        stats = update.player_season_stats(self.payload(), 2027, 2)
+        self.assertEqual(stats["gp"], 5)
+        self.assertEqual(stats["fg_pct"], 46.4)
+        self.assertEqual(stats["three_pct"], 0)
+        self.assertEqual(stats["spg"], 0)
+        self.assertEqual(stats["ppg"], 24.2)
+
+    def test_wrong_year_and_empty_nba_are_not_career_stats(self):
+        self.assertIsNone(update.player_season_stats(self.payload(year=2026), 2027, 2))
+        self.assertIsNone(update.player_season_stats({"categories": []}, 2027, 2))
+        self.assertIsNone(update.player_season_stats(
+            {"filters": [{"name": "league", "value": "nba"}]}, 2027, 2))
+        with self.assertRaises(ValueError):
+            update.player_season_stats({}, 2027, 2)
+
+    def test_regular_and_postseason_do_not_mix(self):
+        self.assertEqual(update.player_season_stats(self.payload(phase=3), 2027, 3)["gp"], 5)
+        with self.assertRaises(ValueError):
+            update.player_season_stats(self.payload(phase=3), 2027, 2)
+
+    def test_traded_player_uses_combined_not_last_team(self):
+        payload = self.payload(gp="3")
+        cat = payload["categories"][0]
+        second = copy.deepcopy(cat["statistics"][0])
+        second["teamId"] = "3"
+        second["stats"][0] = "2"
+        combined = copy.deepcopy(second)
+        combined.pop("teamId")
+        combined["teamSlug"] = "2026-27 Totals"
+        combined["stats"][0] = "5"
+        combined["stats"][2] = "21.7"
+        cat["statistics"] += [second, combined]
+        stats = update.player_season_stats(payload, 2027, 2)
+        self.assertEqual(stats["gp"], 5)
+        self.assertEqual(stats["ppg"], 21.7)
+        cat["statistics"].pop()
+        with self.assertRaises(ValueError):
+            update.player_season_stats(payload, 2027, 2)
+
+    def test_missing_optional_stats_and_zero_games(self):
+        payload = self.payload()
+        payload["categories"][0]["statistics"][0]["stats"][8] = "--"
+        self.assertIsNone(update.player_season_stats(payload, 2027, 2)["fg_pct"])
+        self.assertIsNone(update.player_season_stats(self.payload(gp="0"), 2027, 2))
+
+    def test_invalid_metrics_and_wrong_label_count(self):
+        for value in ("NaN", "inf", "-1", True):
+            payload = self.payload()
+            payload["categories"][0]["statistics"][0]["stats"][2] = value
+            with self.assertRaises(ValueError):
+                update.player_season_stats(payload, 2027, 2)
+        payload = self.payload()
+        payload["categories"][0]["statistics"][0]["stats"][8] = "101"
+        with self.assertRaises(ValueError):
+            update.player_season_stats(payload, 2027, 2)
+        payload["categories"][0]["statistics"][0]["stats"].pop()
+        with self.assertRaises(ValueError):
+            update.player_season_stats(payload, 2027, 2)
+
+    def test_targets_deduplicate_games_and_separate_competitions(self):
+        days = self.days()
+        days[0]["games"].append(copy.deepcopy(days[0]["games"][0]))
+        targets = list(update.player_targets(days))
+        self.assertEqual(len(targets), 1)
+        self.assertEqual(len(targets[0]["played"]), 1)
+        playoff = copy.deepcopy(days[0])
+        playoff["games"][0]["season_type"] = 3
+        playoff["games"] = playoff["games"][:1]
+        self.assertEqual(len(list(update.player_targets(days + [playoff]))), 2)
+
+    def test_dnp_and_preseason_do_not_increment_regular_gp(self):
+        days = self.days()
+        days[0]["games"][0]["away"]["players"][0]["dnp"] = True
+        self.assertEqual(list(update.player_targets(days))[0]["played"], {})
+        days[0]["games"][0]["away"]["players"][0]["dnp"] = False
+        days[0]["games"][0]["season_type"] = 1
+        self.assertEqual(list(update.player_targets(days))[0]["played"], {})
+
+    def test_success_then_failure_preserves_observation_and_averages(self):
+        with TemporaryDirectory() as tmp, patch.object(update, "DATA", Path(tmp)):
+            with patch.object(update, "get", return_value=self.payload()):
+                self.assertIsNone(update.refresh_player(self.target()))
+            path = update.player_season_path(2027, 2, "1")
+            first = update.load(path)
+            with patch.object(update, "get", side_effect=RuntimeError("offline")):
+                self.assertTrue(update.refresh_player(self.target()))
+            saved = update.load(path)
+            self.assertEqual(saved["status"], "stale")
+            self.assertEqual(saved["checked_at"], first["checked_at"])
+            self.assertEqual(saved["stats"], first["stats"])
+
+    def test_gp_lag_does_not_replace_last_good(self):
+        with TemporaryDirectory() as tmp, patch.object(update, "DATA", Path(tmp)):
+            with patch.object(update, "get", return_value=self.payload()):
+                update.refresh_player(self.target())
+                target = self.target()
+                target["played"]["g2"] = "2026-10-31"
+                target["through"] = "2026-10-31"
+                self.assertIn("caught up", update.refresh_player(target))
+            saved = update.load(update.player_season_path(2027, 2, "1"))
+            self.assertEqual(saved["status"], "stale")
+            self.assertEqual(saved["stats"]["gp"], 5)
+            self.assertEqual(saved["archive_through"], "2026-10-30")
+
+    def test_no_published_stats_is_distinct_from_failed_request(self):
+        with TemporaryDirectory() as tmp, patch.object(update, "DATA", Path(tmp)):
+            target = self.target()
+            target["played"] = {}
+            with patch.object(update, "get", return_value={"categories": []}):
+                self.assertIsNone(update.refresh_player(target))
+            self.assertEqual(update.load(update.player_season_path(2027, 2, "1"))["status"], "no_stats")
+            with patch.object(update, "get", return_value={}):
+                self.assertTrue(update.refresh_player(target))
+            self.assertEqual(update.load(update.player_season_path(2027, 2, "1"))["status"], "unavailable")
+
+    def test_fresh_snapshots_skip_network_and_new_game_refreshes(self):
+        with TemporaryDirectory() as tmp, patch.object(update, "DATA", Path(tmp)):
+            with patch.object(update, "get", return_value=self.payload()):
+                update.refresh_player(self.target())
+            with patch.object(update, "get") as get:
+                self.assertEqual(update.refresh_players(self.days()), [])
+                get.assert_not_called()
+            days = self.days()
+            extra = copy.deepcopy(days[0])
+            extra["date"] = "2026-10-31"
+            extra["games"][0]["id"] = "g2"
+            with patch.object(update, "get", return_value=self.payload(gp="6")) as get:
+                self.assertEqual(update.refresh_players(days + [extra]), [])
+                self.assertEqual(get.call_count, 1)
+
+    def test_weekly_correction_pass_and_distinct_file_paths(self):
+        with TemporaryDirectory() as tmp, patch.object(update, "DATA", Path(tmp)):
+            with patch.object(update, "now", return_value="2026-10-20T10:00:00+00:00"), \
+                 patch.object(update, "get", return_value=self.payload()):
+                update.refresh_player(self.target())
+            with patch.object(update, "now", return_value="2026-10-31T10:00:00+00:00"), \
+                 patch.object(update, "get", return_value=self.payload()) as get:
+                self.assertEqual(update.refresh_players(self.days()), [])
+                self.assertEqual(get.call_count, 1)
+            self.assertNotEqual(update.player_season_path(2027, 2, "1"),
+                                update.player_season_path(2027, 3, "1"))
+            self.assertNotEqual(update.player_season_path(2027, 2, "1"),
+                                update.player_season_path(2026, 2, "1"))
+
+    def test_stale_new_appearance_honors_retry_cooldown_and_health(self):
+        with TemporaryDirectory() as tmp, patch.object(update, "DATA", Path(tmp)):
+            with patch.object(update, "get", return_value=self.payload()):
+                update.refresh_player(self.target())
+            days = self.days()
+            days[0]["date"] = "2026-10-31"
+            days[0]["games"][0]["id"] = "g2"
+            with patch.object(update, "get", side_effect=RuntimeError("offline")):
+                self.assertTrue(update.refresh_players(days))
+            with patch.object(update, "get") as get:
+                self.assertTrue(update.refresh_players(days))
+                get.assert_not_called()
+
+    def test_refresh_budget_defers_requests_but_keeps_valid_placeholder(self):
+        with TemporaryDirectory() as tmp, patch.object(update, "DATA", Path(tmp)):
+            with patch.object(update, "PLAYER_REFRESH_SECONDS", -1), patch.object(update, "get") as get:
+                failures = update.refresh_players(self.days())
+                get.assert_not_called()
+            self.assertIn("budget", failures[0])
+            self.assertEqual(update.load(update.player_season_path(2027, 2, "1"))["status"], "unavailable")
 
 
 if __name__ == "__main__":

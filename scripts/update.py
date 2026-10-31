@@ -6,6 +6,7 @@ import datetime as dt
 import json
 import logging
 import math
+from concurrent.futures import ThreadPoolExecutor
 import re
 import subprocess
 import sys
@@ -21,6 +22,8 @@ CHANNEL = "UCWJ2lWNubArHWmf3FIHbfcQ"
 FEED = f"https://www.youtube.com/feeds/videos.xml?channel_id={CHANNEL}"
 API = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba"
 STANDINGS_API = "https://site.api.espn.com/apis/v2/sports/basketball/nba/standings"
+PLAYER_API = "https://site.web.api.espn.com/apis/common/v3/sports/basketball/nba/athletes"
+PLAYER_REFRESH_SECONDS = 180
 LOG = logging.getLogger("update")
 NS = {"a": "http://www.w3.org/2005/Atom",
       "yt": "http://www.youtube.com/xml/schemas/2015",
@@ -212,12 +215,17 @@ def refresh_day(day, force=False):
         competition = event["competitions"][0]
         competitors = {c["homeAway"]: c for c in competition["competitors"]}
         game = {"id": event["id"], "name": event["name"],
+                "season_year": event.get("season", {}).get("year") or board.get("season", {}).get("year"),
+                "season_type": event.get("season", {}).get("type") or board.get("season", {}).get("type"),
                 "status": event["status"]["type"].get("shortDetail", "Final"),
                 "source": f"https://www.espn.com/nba/boxscore/_/gameId/{event['id']}",
                 "observed_at": now(),
                 "away": team_record(competitors["away"]),
                 "home": team_record(competitors["home"])}
         previous = old_games.get(game["id"])
+        for key in ("season_year", "season_type"):
+            if not game[key] and previous:
+                game[key] = previous.get(key)
         complete = previous and all(previous[s].get("players") for s in ("away", "home"))
         # Recheck yesterday/recent corrections even when archived.
         if complete and not force:
@@ -410,6 +418,168 @@ def refresh_standings():
         return [f"Standings: {exc}"]
 
 
+def player_season_path(year, season_type, player_id):
+    label = f"{year - 1}-{str(year)[-2:]}"
+    return DATA / "players" / label / ("playoffs" if season_type == 3 else "regular") / f"{player_id}.json"
+
+
+def player_season_stats(payload, year, season_type):
+    """Select a season's per-game row; never use career or one-team splits."""
+    categories = payload.get("categories")
+    if categories is None and any(f.get("name") == "league" and f.get("value") == "nba"
+                                  for f in payload.get("filters", [])):
+        # ESPN's valid empty NBA response for players with no published NBA row.
+        return None
+    if not isinstance(categories, list):
+        raise ValueError("Player statistics categories are missing")
+    expected = "Postseason Averages" if season_type == 3 else "Regular Season Averages"
+    average = [c for c in categories if c.get("displayName") == expected]
+    if not categories:
+        return None
+    if len(average) != 1:
+        raise ValueError("Expected player averages category is missing or duplicated")
+    category = average[0]
+    rows = [r for r in category["statistics"] if r.get("season", {}).get("year") == year]
+    if not rows:
+        return None
+    if len(rows) > 1:
+        combined = [r for r in rows if not r.get("teamId") and "Totals" in r.get("teamSlug", "")]
+        if len(combined) != 1:
+            raise ValueError("Traded player has no unambiguous combined season row")
+        row = combined[0]
+    else:
+        row = rows[0]
+    if len(category["names"]) != len(row["stats"]):
+        raise ValueError("Player statistic labels and values disagree")
+    raw = dict(zip(category["names"], row["stats"]))
+    fields = {"gp": "gamesPlayed", "mpg": "avgMinutes", "ppg": "avgPoints",
+              "rpg": "avgRebounds", "apg": "avgAssists", "spg": "avgSteals",
+              "bpg": "avgBlocks", "tov": "avgTurnovers", "fg_pct": "fieldGoalPct",
+              "three_pct": "threePointFieldGoalPct", "ft_pct": "freeThrowPct"}
+    stats = {}
+    for key, field in fields.items():
+        value = raw.get(field)
+        if value in (None, "", "-", "--"):
+            stats[key] = None
+            continue
+        if isinstance(value, bool):
+            raise ValueError("Boolean player statistic")
+        value = float(value)
+        if not math.isfinite(value) or value < 0 or (key.endswith("_pct") and value > 100):
+            raise ValueError("Invalid player statistic")
+        stats[key] = value
+    gp = stats["gp"]
+    if gp is None or gp != int(gp):
+        raise ValueError("Player games played is missing or non-integer")
+    if not gp:
+        return None
+    stats["gp"] = int(gp)
+    return stats
+
+
+def player_targets(days):
+    targets = {}
+    for day in days:
+        date = dt.date.fromisoformat(day["date"])
+        for game in day["games"]:
+            year = game.get("season_year") or date.year + (date.month >= 7)
+            phase = 3 if game.get("season_type") == 3 else 2
+            for side in ("away", "home"):
+                for player in game[side].get("players", []):
+                    player_id = str(player["id"])
+                    if not re.fullmatch(r"\d+", player_id):
+                        raise ValueError("Player ID must be numeric")
+                    key = (year, phase, player_id)
+                    target = targets.setdefault(key, {
+                        "year": year, "type": phase, "id": player_id,
+                        "name": player["name"], "through": day["date"], "played": {}})
+                    target["through"] = max(target["through"], day["date"])
+                    if (game.get("season_type") != 1 and not player.get("dnp")
+                            and player.get("stats", {}).get("MIN") not in (None, "", "--", "DNP")):
+                        target["played"][game["id"]] = day["date"]
+    return targets.values()
+
+
+def player_failure(target, previous, attempt, reason):
+    year, phase, player_id = target["year"], target["type"], target["id"]
+    if previous.get("stats"):
+        saved = {**previous, "status": "stale", "generated_at": attempt,
+                 "attempted_archive_through": target["through"],
+                 "attempted_archive_gp": len(target["played"])}
+    else:
+        saved = {"schema_version": 1, "id": player_id, "name": target["name"],
+                 "season": {"year": year, "label": f"{year - 1}-{str(year)[-2:]}", "type": phase},
+                 "scope": "all_teams", "generated_at": attempt, "checked_at": None,
+                 "status": "unavailable", "stats": None,
+                 "archive_through": target["through"], "archive_gp": len(target["played"]),
+                 "source": f"https://www.espn.com/nba/player/stats/_/id/{player_id}"}
+    save(player_season_path(year, phase, player_id), saved)
+    return f"Player {player_id} ({year}/{phase}): {reason}"
+
+
+def refresh_player(target):
+    year, phase, player_id = target["year"], target["type"], target["id"]
+    path = player_season_path(year, phase, player_id)
+    previous = load(path, {})
+    attempt = now()
+    try:
+        payload = get(f"{PLAYER_API}/{player_id}/stats?season={year}&seasontype={phase}")
+        stats = player_season_stats(payload, year, phase)
+        minimum = len(target["played"])
+        if previous.get("stats"):
+            new_games = sum(date > previous["archive_through"] for date in target["played"].values())
+            if new_games:
+                minimum = max(minimum, previous["stats"]["gp"] + new_games)
+        if minimum and (stats is None or stats["gp"] < minimum):
+            raise ValueError("Season statistics have not caught up with completed archived games")
+        save(path, {
+            "schema_version": 1, "id": player_id, "name": target["name"],
+            "season": {"year": year, "label": f"{year - 1}-{str(year)[-2:]}", "type": phase},
+            "scope": "all_teams", "generated_at": attempt, "checked_at": attempt,
+            "status": "ok" if stats else "no_stats", "stats": stats,
+            "archive_through": target["through"], "archive_gp": len(target["played"]),
+            "source": f"https://www.espn.com/nba/player/stats/_/id/{player_id}"})
+        return None
+    except Exception as exc:
+        return player_failure(target, previous, attempt, exc)
+
+
+def refresh_players(days):
+    targets = list(player_targets(days))
+    if not targets:
+        return []
+    current_year = max(t["year"] for t in targets)
+    stamp = dt.datetime.fromisoformat(now())
+    due = []
+    for target in targets:
+        previous = load(player_season_path(target["year"], target["type"], target["id"]), {})
+        changed = (previous.get("attempted_archive_through", previous.get("archive_through")) != target["through"]
+                   or previous.get("attempted_archive_gp", previous.get("archive_gp")) != len(target["played"]))
+        observed = previous.get("checked_at") if previous.get("status") == "ok" else previous.get("generated_at")
+        age = (stamp - dt.datetime.fromisoformat(observed)).total_seconds() if observed else math.inf
+        retry = previous.get("status") in ("stale", "unavailable", "no_stats") and age >= 3600
+        weekly = target["year"] == current_year and age >= 7 * 86400
+        if not previous or changed or retry or weekly:
+            due.append(target)
+    LOG.info("Player season snapshots: %d due of %d contexts", len(due), len(targets))
+    deadline = time.monotonic() + PLAYER_REFRESH_SECONDS
+
+    def bounded_refresh(target):
+        if time.monotonic() > deadline:
+            previous = load(player_season_path(target["year"], target["type"], target["id"]), {})
+            return player_failure(target, previous, now(), "Refresh time budget reached; deferred")
+        return refresh_player(target)
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        failures = [problem for problem in pool.map(bounded_refresh, due) if problem]
+    if not failures:
+        pending = sum(load(player_season_path(t["year"], t["type"], t["id"])).get("status")
+                      in ("stale", "unavailable") for t in targets)
+        if pending:
+            failures.append(f"{pending} player season snapshots remain stale/unavailable; retry cooldown active")
+    return failures if len(failures) <= 10 else failures[:10] + [f"{len(failures) - 10} additional player refresh failures"]
+
+
 def run(args):
     DATA.mkdir(parents=True, exist_ok=True)
     (DATA / "days").mkdir(exist_ok=True)
@@ -485,12 +655,15 @@ def run(args):
                          "top_plays": bool(day.get("videos", {}).get("top_plays")),
                          "recap": bool(day.get("videos", {}).get("recap"))})
     previous_index = load(DATA / "index.json", {})
+    player_problems = refresh_players([load(p) for p in sorted((DATA / "days").glob("*.json"))])
+    problems.extend(player_problems)
     status = {"updated_at": now(), "days": manifest,
               "sources": {"videos": FEED, "scores": f"{API}/scoreboard"},
               "health": {"scores": "ok" if score_success else "error",
                          "videos": "ok" if video_success else "error",
                          "schedule": "error" if schedule_problems else "ok",
                          "standings": "error" if standings_problems else "ok",
+                         "players": "error" if player_problems else "ok",
                          "warnings": problems},
               "last_successful_scores_at": now() if score_success else previous_index.get("last_successful_scores_at"),
               "last_successful_videos_at": now() if video_success else previous_index.get("last_successful_videos_at")}
