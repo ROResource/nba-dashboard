@@ -54,3 +54,6 @@
 - Reviewed screenshots of the collapsed initial view, expanded schedule and mobile expanded box score with the floating close control.
 - The workflow file is unchanged byte-for-byte. It has no native GitHub schedule; the external Pi cron dispatch remains intact.
 - Standings/team stats and inline player season stats are documented in `ROADMAP.md`; they are not yet implemented.
+- All 16 Python unit tests, JavaScript syntax checks and generated-data validation passed.
+- [Release workflow 41191529203](https://github.com/ROResource/nba-dashboard/actions/runs/41191529203) completed successfully, including data refresh and GitHub Pages deployment.
+- Fresh browser contexts verified the updated GitHub Pages site and the existing NBA Daily preview: schedule loading, date/timezone switching, floating/bottom closing, and existing score controls passed with no first-party JavaScript errors.
