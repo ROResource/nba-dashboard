@@ -57,3 +57,18 @@
 - All 16 Python unit tests, JavaScript syntax checks and generated-data validation passed.
 - [Release workflow 41191529203](https://github.com/ROResource/nba-dashboard/actions/runs/41191529203) completed successfully, including data refresh and GitHub Pages deployment.
 - Fresh browser contexts verified the updated GitHub Pages site and the existing NBA Daily preview: schedule loading, date/timezone switching, floating/bottom closing, and existing score controls passed with no first-party JavaScript errors.
+
+## Standings upgrade, 31 October 2026
+
+- All 24 Python unit tests passed, including complete/partial/wrong-season source data, duplicate memberships/ranks, invalid metrics, zero values, last-good fallback and failure isolation from the archive.
+- Generated-data validation passed for 13 archived dates, 81 completed games, eight schedule dates and a complete current regular-season standings snapshot. JavaScript syntax and whitespace checks passed.
+- Standings payload measured 11,147 bytes uncompressed. Browser requests: zero before opening; one on first opening; no further requests for view/group/sort/search changes, score toggles or reopening.
+- Verified both conference groups, all six five-team divisions and the 30-team league comparison. All 30 displayed records, percentages, last ten, streak and per-game figures were checked against the generated source snapshot.
+- Checked provider conference ordering, division leader-relative GB, omitted league GB, local PF/PA/differential sorting, preserved rank labels, team search and no-match recovery.
+- Opening while scores are hidden makes no request. Hide scores conceals already loaded standings; restoring scores reuses the snapshot.
+- Simulated failed request/retry, stale source with original observation time, missing optional metrics and a wholly unavailable snapshot. Missing metrics sort last and display unavailable, never zero.
+- Switching the archive date leaves current-season standings unchanged.
+- Inspected desktop 1440×900 and mobile 375×812 screenshots, plus short desktop 1440×600 and resizing. No document-level horizontal overflow or first-party JavaScript errors.
+- Mobile standings touch tests moved the page 194px vertically and the table 220px horizontally. Sticky team names remained at x=33px; vertical scrolling still worked after horizontal panning.
+- Rechecked schedule dates/timezones, archive/calendar navigation, team filter, score hiding, bottom/floating/Escape box-score closing and focus restoration, video selection and recap chapters/game links. Mobile box-score scrolling still works.
+- Workflow file `.github/workflows/daily.yml` remains byte-for-byte unchanged, including name, triggers and dispatch inputs.

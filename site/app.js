@@ -4,6 +4,7 @@ const escapeHTML = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"
 const safeURL = value => { try { const u = new URL(value); return u.protocol === "https:" ? escapeHTML(u.href) : ""; } catch { return ""; } };
 const state = {index:null, day:null, selected:null, hidden:false, team:"", request:0};
 const scheduleState = {data:null, pending:null, selected:null};
+const standingsState = {data:null,pending:null,view:"conference",groups:{conference:null,division:null}};
 let floatingBox = null;
 const dateFormat = (date, options) => new Intl.DateTimeFormat("en-IE",options).format(new Date(`${date}T12:00:00Z`));
 const formatFull = date => dateFormat(date,{weekday:"long",day:"numeric",month:"long",year:"numeric"});
@@ -171,6 +172,90 @@ $("#schedule-dates").addEventListener("click",e=>{
 });
 $("#schedule-games").addEventListener("click",e=>{if (e.target.closest("[data-retry-schedule]")) loadSchedule();});
 $("#schedule-zone").onchange=()=>{if (scheduleState.data) renderSchedule();};
+
+function syncStandingsSpoilers() {
+  $("#standings-spoilers").hidden=!state.hidden;
+  $("#standings-content").hidden=state.hidden;
+  if (!state.hidden && $("#standings").open) loadStandings();
+}
+function renderStandings() {
+  const data=standingsState.data;
+  if (!data || data.status==="unavailable") {
+    $("#standings-controls").hidden=true;
+    $("#standings-note").textContent="Current standings unavailable · Daily archive unaffected";
+    $("#standings-results").innerHTML='<div class="empty"><h3>Season standings are not available yet.</h3><p>The next daily update will retry.</p></div>';
+    return;
+  }
+  const stamp=new Intl.DateTimeFormat("en-IE",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit",timeZone:"Europe/Dublin",timeZoneName:"short"}).format(new Date(data.checked_at));
+  const old=Date.now()-Date.parse(data.checked_at)>36*3600*1000;
+  $("#standings-note").textContent=`${data.season.label} regular season · Checked ${stamp} · Not live${data.status==="stale"?" · Refresh failed; last-saved standings":old?" · Saved standings may be out of date":""}. Latest season, independent of archive date.`;
+  $("#standings-controls").hidden=false;
+  const view=standingsState.view;
+  $("#standings-views").querySelectorAll("button").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.standingsView===view)));
+  const groups=view==="league"?[]:data[view==="conference"?"conferences":"divisions"];
+  if (groups.length && !groups.some(g=>g.id===standingsState.groups[view])) standingsState.groups[view]=groups[0].id;
+  $("#standings-group-label").hidden=view==="league";
+  $("#standings-group").innerHTML=groups.map(g=>`<option value="${escapeHTML(g.id)}">${escapeHTML(g.name)}</option>`).join("");
+  if (groups.length) $("#standings-group").value=standingsState.groups[view];
+  const group=groups.find(g=>g.id===standingsState.groups[view]);
+  const name=view==="league"?"League comparison":group.name;
+  const base=data.teams.filter(t=>view==="league" || t[`${view}_id`]===group.id);
+  base.sort(view==="league"?(a,b)=>b.stats.win_pct-a.stats.win_pct || b.stats.wins-a.stats.wins || a.name.localeCompare(b.name):(a,b)=>a.stats.conference_rank-b.stats.conference_rank);
+  const ranks=new Map(base.map((t,i)=>[t.id,view==="conference"?t.stats.conference_rank:i+1]));
+  const leader=base[0];
+  const query=$("#standings-search").value.trim().toLowerCase();
+  const visible=base.filter(t=>`${t.name} ${t.abbreviation} ${t.short_name}`.toLowerCase().includes(query));
+  const sort=$("#standings-sort").value;
+  if (sort!=="rank") visible.sort((a,b)=>{
+    const left=a.stats[sort],right=b.stats[sort];
+    if (left===null && right===null) return ranks.get(a.id)-ranks.get(b.id);
+    if (left===null) return 1;
+    if (right===null) return -1;
+    return (sort==="points_against"?left-right:right-left) || ranks.get(a.id)-ranks.get(b.id);
+  });
+  const missing='<span aria-label="Unavailable">–</span>';
+  const number=(value,digits=1)=>Number.isFinite(value)?value.toFixed(digits):missing;
+  const gb=t=>view==="conference"?t.stats.conference_gb:((leader.stats.wins-t.stats.wins)+(t.stats.losses-leader.stats.losses))/2;
+  const headers=[["Team","Group rank and team"],["W-L","Wins and losses"],["PCT","Win percentage"],...(view==="league"?[]:[["GB",view==="conference"?"Games behind conference leader":"Games behind division leader"]]),["L10","Last ten games"],["STRK","Current streak"],["PF/G","Points scored per game"],["PA/G","Points conceded per game"],["DIFF","Points differential per game, not net rating"]];
+  const table=visible.length?`<p class="standings-scroll-hint">Scroll the table horizontally for team stats.</p><div class="table-scroll" role="region" aria-label="${escapeHTML(name)} team statistics, scroll for all columns" tabindex="0"><table class="standings-table"><caption class="standings-caption">${escapeHTML(name)}<span class="standings-record-note">${visible.length} of ${base.length} teams</span></caption><thead><tr>${headers.map(([text,title])=>`<th scope="col" title="${title}">${text}</th>`).join("")}</tr></thead><tbody>${visible.map(t=>{
+    const s=t.stats;
+    const behind=view==="league"?null:gb(t);
+    const text=value=>value?escapeHTML(value):missing;
+    return `<tr data-standing-team="${escapeHTML(t.id)}"><th scope="row"><span class="standings-rank">${ranks.get(t.id)}</span><span class="standings-team-full">${escapeHTML(t.name)}</span><span class="standings-team-short" title="${escapeHTML(t.name)}">${escapeHTML(t.short_name)}</span></th><td>${s.wins}-${s.losses}</td><td>${s.win_pct.toFixed(3)}</td>${view==="league"?"":`<td>${behind===0?"–":number(behind,Number.isInteger(behind)?0:1)}</td>`}<td>${text(s.last_ten)}</td><td>${text(s.streak)}</td><td>${number(s.points_for)}</td><td>${number(s.points_against)}</td><td class="${s.point_diff>0?"standings-diff-positive":""}">${s.point_diff>0?"+":""}${number(s.point_diff)}</td></tr>`;
+  }).join("")}</tbody></table></div>`:'<div class="empty"><h3>No matching teams in this group.</h3><p>Clear the team filter or choose another group.</p></div>';
+  const order=view==="league"?"League order: win percentage, then wins, then team name. Comparison only, not official playoff seeding. Games behind is omitted across conferences.":view==="conference"?"Conference order and games behind follow ESPN’s conference standings.":"Division order follows the provider’s conference rankings within each division, including its tiebreaks. Games behind is calculated from this division’s leader.";
+  $("#standings-results").innerHTML=table+`<div class="standings-footer"><p>${order}${sort!=="rank"?" Rows are sorted by the selected statistic; rank labels remain the original group ranks.":""}</p><p>PF/G and PA/G are points per game. DIFF is average point differential, not net rating. Scroll horizontally for all columns. ${outbound(data.source,"ESPN standings ↗")}</p></div>`;
+}
+async function loadStandings() {
+  if (state.hidden) return;
+  if (standingsState.data) { renderStandings(); return; }
+  if (standingsState.pending) return standingsState.pending;
+  $("#standings-results").innerHTML='<div class="loading">Loading standings…</div>';
+  standingsState.pending=(async()=>{
+    try {
+      const data=await readJSON("./data/standings.json");
+      if (data.schema_version!==1 || !["ok","stale","unavailable"].includes(data.status) ||
+          !Array.isArray(data.teams) || (data.status!=="unavailable" && (data.teams.length!==30 || data.season?.type!==2))) throw new Error("Invalid standings");
+      standingsState.data=data;
+      renderStandings();
+    } catch {
+      standingsState.data=null;
+      $("#standings-controls").hidden=true;
+      $("#standings-results").innerHTML='<div class="empty"><h3>Standings could not be loaded.</h3><p>The daily archive is still available below.</p><button type="button" data-retry-standings>Try again</button></div>';
+    } finally { standingsState.pending=null; }
+  })();
+  return standingsState.pending;
+}
+$("#standings").addEventListener("toggle",()=>{if ($("#standings").open) syncStandingsSpoilers();});
+$("#standings-views").addEventListener("click",e=>{
+  const button=e.target.closest("[data-standings-view]");
+  if (button) { standingsState.view=button.dataset.standingsView; renderStandings(); }
+});
+$("#standings-group").onchange=e=>{standingsState.groups[standingsState.view]=e.target.value;renderStandings();};
+$("#standings-sort").onchange=renderStandings;
+$("#standings-search").oninput=renderStandings;
+$("#standings-results").addEventListener("click",e=>{if (e.target.closest("[data-retry-standings]")) loadStandings();});
+
 function renderTeamFilter() {
   const teams=[...new Map(state.day.games.flatMap(g=>[g.away,g.home]).map(t=>[t.id,t])).values()].sort((a,b)=>a.name.localeCompare(b.name));
   if (!teams.some(t=>t.id===state.team)) state.team="";
@@ -215,6 +300,7 @@ $("#spoilers").onclick=()=>{
   $("#spoilers").setAttribute("aria-pressed",String(state.hidden));
   $("#spoilers").textContent=state.hidden?"Show scores":"Hide scores";
   renderGames();
+  syncStandingsSpoilers();
 };
 async function init() {
   try {

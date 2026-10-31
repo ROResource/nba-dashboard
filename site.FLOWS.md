@@ -19,4 +19,17 @@
 - Closing returns focus and view to that game's summary. Escape closes when focus is inside the box score. Native summary toggling still works.
 - Recheck score hiding, filters, archive navigation, videos, mobile two-axis table scrolling, desktop/mobile/short-window layout and console errors.
 - Preserve `.github/workflows/daily.yml` byte-for-byte, including workflow name, dispatch inputs, jobs and triggers. Do not add a GitHub schedule.
-- Roadmap captures standings/team stats and inline player season stats as planned, not implemented.
+- Roadmap distinguishes delivered standings/team stats from planned inline player season stats.
+
+## Standings upgrade acceptance checks
+
+- Initially collapsed; no standings request before first opening. One small static file, reused across view/group/sort/search changes and reopening.
+- Conference view defaults to East; switch West. Division view exposes six provider-sourced groups. League comparison includes 30 unique teams.
+- Use provider conference ranks; division order follows those ranks within each division. League sorts by win percentage, wins and team name, not official seeding.
+- Conference GB uses provider data; division GB is computed relative to that division's leader. League omits GB.
+- W-L, PCT, L10, streak, PF/G, PA/G and per-game differential match the generated snapshot. Missing optional metrics show unavailable, never zero.
+- Sorting and search are local, group-specific and keep the original group rank visible. Switching archive dates does not change current-season standings.
+- Spoiler toggle hides standings and makes no request if opened while scores are hidden. Restoring scores loads or reuses data without leaking records.
+- Failed request/retry, unavailable snapshot, stale source and older saved timestamps are labelled. Supplementary failure must not stop archive updates.
+- Desktop/mobile screenshots, sticky team names, horizontal/vertical touch scrolling, keyboard controls, overflow and console checks.
+- Recheck all existing schedule/archive/video/filter/spoiler/box-score close flows and keep workflow byte-for-byte unchanged.

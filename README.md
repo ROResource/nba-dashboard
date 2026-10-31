@@ -8,6 +8,7 @@ A small GitHub Pages dashboard for a next-morning NBA catch-up:
 - Recent-date buttons, full archive date picker, team filtering and a hide-scores switch.
 - Today plus the next seven game dates in a compact schedule, with Dublin/Eastern times.
 - Bottom and contextual floating box-score close buttons, plus Escape support.
+- League, conference and division standings with team records, last ten, streak and points per game.
 - Daily GitHub Actions updates and a permanent date-based archive.
 
 ## Website
@@ -27,6 +28,10 @@ Data lives in `site/data/days/YYYY-MM-DD.json`. `site/data/index.json` is the li
 The updater also builds `site/data/schedule.json` for today through today + seven days, using Eastern game dates regardless of archive backfill inputs. The schedule panel is initially collapsed and fetches this small snapshot only when first opened. Date/timezone switches and reopening reuse it in memory. Tip-off timestamps are stored with their timezone and displayed with explicit local dates, so games after midnight and daylight-saving changes are unambiguous. No live scores or browser sports-API requests are added.
 
 Each schedule date has its own observation time and health status. A failed refresh retains that date's previous fixtures; a date with no saved data is explicitly unavailable rather than falsely reporting no games. Stale snapshots are labelled in the UI. The schedule is not a live service, and fixtures may change between updates.
+
+`site/data/standings.json` is a separate current regular-season snapshot, requested only when its collapsed panel is opened. League, conference and division views, group selection, team search and statistic sorting run locally without more requests. Conference order uses provider ranks; division order preserves those ranks within provider-sourced division membership. League order is a win-percentage comparison, not official playoff seeding. Division games-behind is calculated within the selected division; conference GB is provider-sourced, and league GB is omitted.
+
+Team season columns include W-L, win percentage, last ten, streak, points for/against per game and average point differential. Differential is not net rating. Missing optional figures are unavailable rather than zero. Standings reflect the current provider season, not the selected archived date, and respect the existing Hide scores control. Failed or incomplete source responses preserve the last-good snapshot and its observation time. No new scheduler, workflow inputs, credentials or browser sports-API calls are introduced.
 
 The updater merges existing data, retries HTTP failures, preserves previous box scores on failure, validates the output, commits changed JSON, and deploys the `site` directory with the official Pages Actions. A partial upstream outage still deploys the last available data but marks the workflow failed, rather than silently reporting success.
 
@@ -65,4 +70,4 @@ python -m http.server 8000 --directory site
 
 GitHub Pages must use **GitHub Actions** as its build source. The workflow needs `contents: write`, `pages: write` and `id-token: write`. It commits only public JSON data. No credentials appear in the static website.
 
-Standings, team season statistics and inline player season disclosures are planned next. See [the upgrade roadmap](ROADMAP.md) for scope, sequencing and acceptance criteria. Live scoring remains outside the catch-up scope.
+Inline player season disclosures are planned next. See [the upgrade roadmap](ROADMAP.md) for scope, sequencing and acceptance criteria. Live scoring remains outside the catch-up scope.

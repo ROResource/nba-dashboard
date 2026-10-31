@@ -10,7 +10,7 @@ The goal is a streamlined daily catch-up: static prebuilt data, immediate local 
 - One small `site/data/schedule.json`, loaded only on first opening and cached in memory. Date and timezone changes make no further requests.
 - Schedule generation in the existing updater, per-day last-good fallback, explicit unavailable/stale states, validation and regression tests.
 
-## Next: standings and team season stats
+## Delivered: standings and team season stats
 
 - Views: overall league, Eastern/Western conference and division.
 - Start with verified provider fields: W, L, win percentage, games behind, streak, last ten, points for/against and differential.
@@ -20,7 +20,18 @@ The goal is a streamlined daily catch-up: static prebuilt data, immediate local 
 - Lazy-load once when opened. Use compact view switches and local sorting without a new page or framework.
 - Acceptance: rankings agree with the source, regular season and playoffs are not mixed, missing metrics show unavailable, mobile columns stay readable, and source failure preserves last-good data.
 
-## Then: inline player season statistics
+### Implementation
+
+- Collapsed, lazy-loaded standings panel with League, Conference and Division views, local group selection, team filtering and statistics sorting.
+- Current regular season is identified by the provider, independent of the selected archived game date.
+- Conference ranks come from ESPN; division order preserves those ranks within provider-sourced division membership. League comparison sorts by percentage, wins and name and is explicitly not playoff seeding.
+- Conference GB comes from the source. Division GB is calculated from that division's leader. GB is deliberately omitted from the league comparison.
+- W-L, PCT, last ten, streak, points for/against per game and average point differential are displayed. Advanced efficiency/net ratings are not inferred.
+- Exactly one small `standings.json` is fetched on first opening; all view/sort/search interactions reuse it. No logos or new image requests are needed.
+- The existing Hide scores control also hides standings. Opening standings while scores are hidden makes no request.
+- Two source requests per daily update produce one validated 30-team snapshot; incomplete, duplicate, wrong-season and inconsistent data preserve the entire last-good snapshot with an explicit stale label.
+
+## Next: inline player season statistics
 
 - Make a player name a keyboard-operable disclosure control; insert a slim detail row directly below that player.
 - Start with GP, MPG, PPG, RPG, APG, SPG, BPG, turnovers and FG/3P/FT percentages.

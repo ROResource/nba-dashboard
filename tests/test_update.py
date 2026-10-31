@@ -1,5 +1,6 @@
 import importlib.util
 import datetime as dt
+import copy
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -84,6 +85,7 @@ class TestUpdate(unittest.TestCase):
             args = SimpleNamespace(from_date="2026-10-20", to_date="2026-10-20",
                                    days=7, skip_discovery=True, video_limit=20)
             with patch.object(update, "refresh_schedule", return_value=["Schedule offline"]) as schedule, \
+                 patch.object(update, "refresh_standings", return_value=["Standings offline"]), \
                  patch.object(update, "refresh_day", return_value=[]), \
                  patch.object(update, "read_feed", return_value=[]):
                 self.assertEqual(update.run(args), 1)
@@ -91,6 +93,7 @@ class TestUpdate(unittest.TestCase):
                              dt.datetime.now(update.ZoneInfo("America/New_York")).date())
             index = update.load(Path(tmp) / "index.json")
             self.assertEqual(index["health"]["schedule"], "error")
+            self.assertEqual(index["health"]["standings"], "error")
             self.assertEqual(index["health"]["scores"], "ok")
             self.assertEqual(index["health"]["videos"], "ok")
             self.assertEqual(index["days"][0]["date"], "2026-10-20")
@@ -154,6 +157,109 @@ class TestUpdate(unittest.TestCase):
                 update.refresh_day("2026-10-24")
             saved=update.load(Path(tmp)/"days/2026-10-24.json")
             self.assertEqual(saved["games"], [{"id":"saved"}])
+
+
+class TestStandings(unittest.TestCase):
+    def data(self):
+        conference = {"season": {"year": 2027, "displayName": "2026-27"}, "children": []}
+        division = {"season": {"year": 2027}, "children": []}
+        for conf in range(2):
+            entries, groups = [], []
+            for div in range(3):
+                members = []
+                for index in range(5):
+                    rank = div * 5 + index + 1
+                    wins, losses = 16 - rank, rank
+                    stats = {"wins": wins, "losses": losses, "winPercent": wins / 16,
+                             "playoffSeed": rank, "gamesBehind": rank - 1,
+                             "avgPointsFor": 110, "avgPointsAgainst": 105, "differential": 5}
+                    entry = {"team": {"id": str(conf * 15 + rank),
+                                      "displayName": f"Team {conf}-{rank}", "abbreviation": f"T{rank}"},
+                             "stats": [{"name": key, "value": value} for key, value in stats.items()]}
+                    entries.append(entry)
+                    members.append(copy.deepcopy(entry))
+                groups.append({"id": f"{conf}-{div}", "name": f"Division {div}",
+                               "standings": {"season": 2027, "seasonType": 2, "entries": members}})
+            conference["children"].append({"id": str(conf), "name": f"Conference {conf}",
+                                           "standings": {"season": 2027, "seasonType": 2, "entries": entries}})
+            division["children"].append({"id": str(conf), "children": groups})
+        return conference, division
+
+    def test_build_complete_standings_and_optional_missing(self):
+        result = update.build_standings(*self.data())
+        self.assertEqual(len(result["teams"]), 30)
+        self.assertEqual(len(result["divisions"]), 6)
+        self.assertEqual(result["season"]["type"], 2)
+        team = result["teams"][0]
+        self.assertEqual(team["division_id"], "0-0")
+        self.assertEqual(team["stats"]["conference_rank"], 1)
+        self.assertIsNone(team["stats"]["last_ten"])
+        self.assertEqual(team["stats"]["point_diff"], 5)
+
+    def test_zero_metrics_are_not_missing(self):
+        entry = self.data()[0]["children"][0]["standings"]["entries"][-1]
+        entry["stats"].append({"name": "differential", "value": 0})
+        self.assertEqual(update.standings_stats(entry)["point_diff"], 0)
+        self.assertEqual(update.standings_stats(entry)["wins"], 1)
+
+    def test_invalid_numeric_metrics(self):
+        for value in (float("nan"), float("inf"), True, "12"):
+            entry = copy.deepcopy(self.data()[0]["children"][0]["standings"]["entries"][0])
+            entry["stats"].append({"name": "wins", "value": value})
+            with self.assertRaises(ValueError):
+                update.standings_stats(entry)
+
+    def test_inconsistent_record_is_rejected(self):
+        entry = self.data()[0]["children"][0]["standings"]["entries"][0]
+        entry["stats"].append({"name": "winPercent", "value": 0})
+        with self.assertRaises(ValueError):
+            update.standings_stats(entry)
+
+    def test_partial_and_mismatched_seasons_rejected(self):
+        conf, div = self.data()
+        div["season"]["year"] = 2026
+        with self.assertRaises(ValueError):
+            update.build_standings(conf, div)
+        conf, div = self.data()
+        conf["children"][0]["standings"]["entries"].pop()
+        with self.assertRaises(ValueError):
+            update.build_standings(conf, div)
+        conf, div = self.data()
+        div["children"][0]["children"][0]["standings"]["seasonType"] = 3
+        with self.assertRaises(ValueError):
+            update.build_standings(conf, div)
+
+    def test_duplicate_ranks_and_memberships_rejected(self):
+        conf, div = self.data()
+        conf["children"][0]["standings"]["entries"][0]["stats"].append({"name": "playoffSeed", "value": 2})
+        with self.assertRaises(ValueError):
+            update.build_standings(conf, div)
+        conf, div = self.data()
+        div["children"][0]["children"][0]["standings"]["entries"][1] = copy.deepcopy(div["children"][0]["children"][0]["standings"]["entries"][0])
+        with self.assertRaises(ValueError):
+            update.build_standings(conf, div)
+
+    def test_refresh_success_and_last_good_failure(self):
+        with TemporaryDirectory() as tmp, patch.object(update, "DATA", Path(tmp)):
+            with patch.object(update, "get", side_effect=list(self.data())) as get:
+                self.assertEqual(update.refresh_standings(), [])
+            self.assertEqual(get.call_count, 2)
+            self.assertIn("season=2027", get.call_args.args[0])
+            first = update.load(Path(tmp) / "standings.json")
+            with patch.object(update, "get", side_effect=RuntimeError("offline")):
+                self.assertTrue(update.refresh_standings())
+            saved = update.load(Path(tmp) / "standings.json")
+            self.assertEqual(saved["status"], "stale")
+            self.assertEqual(saved["checked_at"], first["checked_at"])
+            self.assertEqual(saved["teams"], first["teams"])
+
+    def test_first_failure_is_unavailable_not_empty_league(self):
+        with TemporaryDirectory() as tmp, patch.object(update, "DATA", Path(tmp)):
+            with patch.object(update, "get", return_value={}):
+                self.assertTrue(update.refresh_standings())
+            saved = update.load(Path(tmp) / "standings.json")
+            self.assertEqual(saved["status"], "unavailable")
+            self.assertIsNone(saved["checked_at"])
 
 
 if __name__ == "__main__":

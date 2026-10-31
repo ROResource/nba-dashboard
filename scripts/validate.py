@@ -2,6 +2,7 @@
 import json
 import re
 import datetime as dt
+import math
 from pathlib import Path
 
 data = Path(__file__).resolve().parents[1] / "site" / "data"
@@ -59,3 +60,41 @@ for offset, day in enumerate(schedule["days"]):
             assert game[side]["id"] and game[side]["name"]
             assert "score" not in game[side], "Schedule must not expose scores"
 print("Validated eight schedule dates, including explicit fallback states.")
+
+standings = json.loads((data / "standings.json").read_text())
+assert standings["schema_version"] == 1
+assert standings["status"] in ("ok", "stale", "unavailable")
+assert standings["source"] == "https://www.espn.com/nba/standings"
+dt.datetime.fromisoformat(standings["generated_at"])
+if standings["status"] == "unavailable":
+    assert standings["teams"] == [] and standings["checked_at"] is None
+else:
+    assert standings["season"]["type"] == 2
+    assert standings["season"]["label"]
+    dt.datetime.fromisoformat(standings["checked_at"])
+    conferences = {g["id"] for g in standings["conferences"]}
+    divisions = {g["id"]: g["conference_id"] for g in standings["divisions"]}
+    assert len(standings["conferences"]) == len(conferences) == 2
+    assert len(standings["divisions"]) == len(divisions) == 6
+    assert len(standings["teams"]) == len({t["id"] for t in standings["teams"]}) == 30
+    for conf in conferences:
+        group = [t for t in standings["teams"] if t["conference_id"] == conf]
+        assert len(group) == 15
+        assert sorted(t["stats"]["conference_rank"] for t in group) == list(range(1, 16))
+    for division, conf in divisions.items():
+        assert conf in conferences
+        assert len([t for t in standings["teams"] if t["division_id"] == division]) == 5
+    for team in standings["teams"]:
+        assert team["name"] and team["abbreviation"]
+        assert divisions[team["division_id"]] == team["conference_id"]
+        stats = team["stats"]
+        assert isinstance(stats["wins"], int) and stats["wins"] >= 0
+        assert isinstance(stats["losses"], int) and stats["losses"] >= 0
+        assert 0 <= stats["win_pct"] <= 1
+        if stats["wins"] + stats["losses"]:
+            assert abs(stats["win_pct"] - stats["wins"] / (stats["wins"] + stats["losses"])) <= .001
+        for key in ("points_for", "points_against", "point_diff", "conference_gb"):
+            assert stats[key] is None or (isinstance(stats[key], (int, float)) and math.isfinite(stats[key]))
+        if all(stats[key] is not None for key in ("points_for", "points_against", "point_diff")):
+            assert abs(stats["points_for"] - stats["points_against"] - stats["point_diff"]) <= .21
+print(f"Validated standings snapshot: {standings['status']}.")

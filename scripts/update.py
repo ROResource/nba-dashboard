@@ -5,6 +5,7 @@ import copy
 import datetime as dt
 import json
 import logging
+import math
 import re
 import subprocess
 import sys
@@ -19,6 +20,7 @@ DATA = ROOT / "site" / "data"
 CHANNEL = "UCWJ2lWNubArHWmf3FIHbfcQ"
 FEED = f"https://www.youtube.com/feeds/videos.xml?channel_id={CHANNEL}"
 API = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba"
+STANDINGS_API = "https://site.api.espn.com/apis/v2/sports/basketball/nba/standings"
 LOG = logging.getLogger("update")
 NS = {"a": "http://www.w3.org/2005/Atom",
       "yt": "http://www.youtube.com/xml/schemas/2015",
@@ -301,6 +303,113 @@ def refresh_schedule(today):
     return failures
 
 
+def standings_stats(entry):
+    stats = {s["name"]: s for s in entry.get("stats", [])}
+
+    def number(name, required=False):
+        value = stats.get(name, {}).get("value")
+        valid = isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+        if not valid and required:
+            raise ValueError(f"Missing standings statistic: {name}")
+        return value if valid else None
+
+    def text(name):
+        return stats.get(name, {}).get("displayValue") or None
+
+    wins, losses = number("wins", True), number("losses", True)
+    pct, rank = number("winPercent", True), number("playoffSeed", True)
+    if (wins < 0 or losses < 0 or wins != int(wins) or losses != int(losses)
+            or not 0 <= pct <= 1 or not 1 <= rank <= 15 or rank != int(rank)):
+        raise ValueError("Invalid standings record or conference rank")
+    if wins + losses and abs(pct - wins / (wins + losses)) > .001:
+        raise ValueError("Record and win percentage disagree")
+    return {"wins": int(wins), "losses": int(losses), "win_pct": pct,
+            "conference_rank": int(rank), "conference_gb": number("gamesBehind"),
+            "last_ten": text("Last Ten Games"), "streak": text("streak"),
+            "home_record": text("Home"), "away_record": text("Road"),
+            "points_for": number("avgPointsFor"),
+            "points_against": number("avgPointsAgainst"),
+            "point_diff": number("differential")}
+
+
+def build_standings(conference_data, division_data):
+    """Use provider grouping/ranks, never infer divisions from team names."""
+    season = conference_data["season"]
+    year = season["year"]
+    if division_data["season"]["year"] != year:
+        raise ValueError("Standings seasons disagree")
+    conferences, divisions, teams, memberships = [], [], [], {}
+    for conference in division_data["children"]:
+        for division in conference["children"]:
+            table = division["standings"]
+            if table["season"] != year or table["seasonType"] != 2:
+                raise ValueError("Division table is not the requested regular season")
+            entries = table["entries"]
+            if len(entries) != 5:
+                raise ValueError("Incomplete division standings")
+            divisions.append({"id": str(division["id"]), "name": division["name"],
+                              "conference_id": str(conference["id"])})
+            for entry in entries:
+                team_id = str(entry["team"]["id"])
+                if team_id in memberships:
+                    raise ValueError("Duplicate division membership")
+                memberships[team_id] = (str(conference["id"]), str(division["id"]),
+                                        standings_stats(entry))
+    for conference in conference_data["children"]:
+        conf_id = str(conference["id"])
+        table = conference["standings"]
+        if table["season"] != year or table["seasonType"] != 2 or len(table["entries"]) != 15:
+            raise ValueError("Incomplete or wrong-season conference standings")
+        conferences.append({"id": conf_id, "name": conference["name"]})
+        ranks = set()
+        for entry in table["entries"]:
+            team = entry["team"]
+            team_id, stats = str(team["id"]), standings_stats(entry)
+            membership = memberships.get(team_id)
+            if not membership or membership[0] != conf_id:
+                raise ValueError("Conference/division membership mismatch")
+            # The two requests must describe one consistent observation.
+            if any(stats[key] != membership[2][key] for key in ("wins", "losses", "conference_rank")):
+                raise ValueError("Standings changed between source requests")
+            if stats["conference_rank"] in ranks:
+                raise ValueError("Duplicate conference rank")
+            ranks.add(stats["conference_rank"])
+            teams.append({"id": team_id, "name": team["displayName"],
+                          "short_name": team.get("shortDisplayName") or team["displayName"],
+                          "abbreviation": team["abbreviation"], "conference_id": conf_id,
+                          "division_id": membership[1], "stats": stats})
+    if (len(conferences) != 2 or len({c["id"] for c in conferences}) != 2
+            or len(divisions) != 6 or len(teams) != 30
+            or len({t["id"] for t in teams}) != 30 or set(memberships) != {t["id"] for t in teams}
+            or len({d["id"] for d in divisions}) != 6):
+        raise ValueError("Incomplete or duplicate NBA standings")
+    return {"season": {"year": year, "label": season["displayName"], "type": 2},
+            "conferences": conferences, "divisions": divisions, "teams": teams}
+
+
+def refresh_standings():
+    path = DATA / "standings.json"
+    previous = load(path, {})
+    checked = now()
+    try:
+        conference = get(f"{STANDINGS_API}?seasontype=2")
+        year = int(conference["season"]["year"])
+        division = get(f"{STANDINGS_API}?season={year}&seasontype=2&type=0&level=3")
+        result = build_standings(conference, division)
+        save(path, {"schema_version": 1, "generated_at": checked, "checked_at": checked,
+                    "status": "ok", "source": "https://www.espn.com/nba/standings", **result})
+        return []
+    except Exception as exc:
+        if previous.get("teams"):
+            result = {**previous, "status": "stale", "generated_at": checked}
+        else:
+            result = {"schema_version": 1, "generated_at": checked, "checked_at": None,
+                      "status": "unavailable", "source": "https://www.espn.com/nba/standings",
+                      "season": None, "conferences": [], "divisions": [], "teams": []}
+        save(path, result)
+        return [f"Standings: {exc}"]
+
+
 def run(args):
     DATA.mkdir(parents=True, exist_ok=True)
     (DATA / "days").mkdir(exist_ok=True)
@@ -313,6 +422,8 @@ def run(args):
     # Schedule is always relative to today, even during an archive backfill.
     schedule_problems = refresh_schedule(today)
     problems.extend(schedule_problems)
+    standings_problems = refresh_standings()
+    problems.extend(standings_problems)
     current = start
     while current <= end:
         day = current.isoformat()
@@ -379,6 +490,7 @@ def run(args):
               "health": {"scores": "ok" if score_success else "error",
                          "videos": "ok" if video_success else "error",
                          "schedule": "error" if schedule_problems else "ok",
+                         "standings": "error" if standings_problems else "ok",
                          "warnings": problems},
               "last_successful_scores_at": now() if score_success else previous_index.get("last_successful_scores_at"),
               "last_successful_videos_at": now() if video_success else previous_index.get("last_successful_videos_at")}

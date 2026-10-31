@@ -8,8 +8,8 @@
   <title>NBA Daily | The night, caught up.</title>
   <link rel="preconnect" href="https://api.fontshare.com">
   <link href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700,900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./style.css?v=20261031-upgrades">
-  <script src="./app.js?v=20261031-upgrades" defer></script>
+  <link rel="stylesheet" href="./style.css?v=20261031-standings">
+  <script src="./app.js?v=20261031-standings" defer></script>
 </head>
 <body>
   <a class="skip" href="#content">Skip to content</a>
@@ -33,6 +33,28 @@
           <div class="schedule-toolbar"><p id="schedule-note" class="muted" role="status">Saved daily schedule · Not live</p><label class="schedule-zone">Times <select id="schedule-zone"><option value="Europe/Dublin">Dublin</option><option value="America/New_York">US Eastern</option></select></label></div>
           <div id="schedule-dates" class="dates" aria-label="Upcoming game dates"></div>
           <div id="schedule-games" aria-live="polite"><div class="loading">Loading upcoming games…</div></div>
+        </div>
+      </details>
+    </section>
+    <section class="schedule-section" aria-label="Season standings and team statistics">
+      <details id="standings">
+        <summary><span>Standings &amp; team stats <small>League · Conference · Division</small></span></summary>
+        <div id="standings-spoilers" class="standings-content muted" hidden>Standings are hidden while scores are hidden.</div>
+        <div id="standings-content" class="standings-content">
+          <p id="standings-note" class="muted" role="status">Current season · Regular season · Not live</p>
+          <div id="standings-controls" hidden>
+            <div id="standings-views" class="standings-views" role="group" aria-label="Standings view">
+              <button type="button" data-standings-view="league" aria-pressed="false">League</button>
+              <button type="button" data-standings-view="conference" aria-pressed="true">Conference</button>
+              <button type="button" data-standings-view="division" aria-pressed="false">Division</button>
+            </div>
+            <div class="standings-toolbar">
+              <label id="standings-group-label">Group <select id="standings-group"></select></label>
+              <label>Order <select id="standings-sort"><option value="rank">Standings</option><option value="points_for">Points for ↓</option><option value="points_against">Points against ↑</option><option value="point_diff">Differential ↓</option></select></label>
+              <label class="standings-search">Team <input id="standings-search" type="search" placeholder="Filter teams" autocomplete="off"></label>
+            </div>
+          </div>
+          <div id="standings-results" aria-live="polite"><div class="loading">Loading standings…</div></div>
         </div>
       </details>
     </section>
