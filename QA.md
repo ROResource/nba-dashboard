@@ -72,3 +72,5 @@
 - Mobile standings touch tests moved the page 194px vertically and the table 220px horizontally. Sticky team names remained at x=33px; vertical scrolling still worked after horizontal panning.
 - Rechecked schedule dates/timezones, archive/calendar navigation, team filter, score hiding, bottom/floating/Escape box-score closing and focus restoration, video selection and recap chapters/game links. Mobile box-score scrolling still works.
 - Workflow file `.github/workflows/daily.yml` remains byte-for-byte unchanged, including name, triggers and dispatch inputs.
+- [Standings release workflow 41192150519](https://github.com/ROResource/nba-dashboard/actions/runs/41192150519) completed successfully and the new version was verified on GitHub Pages.
+- Fresh-context hosted checks passed on both GitHub Pages and the existing preview: all three standings views, groups, search/sort, spoiler behavior, one-request loading, schedule, archive/calendar, team filter, box-score closing, video loading and 375px layout. No first-party JavaScript errors.
