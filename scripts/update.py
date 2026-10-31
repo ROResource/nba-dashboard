@@ -530,7 +530,9 @@ def refresh_player(target):
             new_games = sum(date > previous["archive_through"] for date in target["played"].values())
             if new_games:
                 minimum = max(minimum, previous["stats"]["gp"] + new_games)
-        if minimum and (stats is None or stats["gp"] < minimum):
+        if stats is None and previous.get("stats"):
+            raise ValueError("Unexpected empty season response; keeping last-good averages")
+        if stats is not None and stats["gp"] < minimum:
             raise ValueError("Season statistics have not caught up with completed archived games")
         save(path, {
             "schema_version": 1, "id": player_id, "name": target["name"],

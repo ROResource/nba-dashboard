@@ -393,7 +393,6 @@ class TestPlayerSeasons(unittest.TestCase):
     def test_no_published_stats_is_distinct_from_failed_request(self):
         with TemporaryDirectory() as tmp, patch.object(update, "DATA", Path(tmp)):
             target = self.target()
-            target["played"] = {}
             with patch.object(update, "get", return_value={"categories": []}):
                 self.assertIsNone(update.refresh_player(target))
             self.assertEqual(update.load(update.player_season_path(2027, 2, "1"))["status"], "no_stats")
@@ -401,6 +400,15 @@ class TestPlayerSeasons(unittest.TestCase):
                 self.assertTrue(update.refresh_player(target))
             self.assertEqual(update.load(update.player_season_path(2027, 2, "1"))["status"], "unavailable")
 
+    def test_valid_empty_response_does_not_erase_published_averages(self):
+        with TemporaryDirectory() as tmp, patch.object(update, "DATA", Path(tmp)):
+            with patch.object(update, "get", return_value=self.payload()):
+                update.refresh_player(self.target())
+            with patch.object(update, "get", return_value={"categories": []}):
+                self.assertIn("empty", update.refresh_player(self.target()))
+            saved = update.load(update.player_season_path(2027, 2, "1"))
+            self.assertEqual(saved["status"], "stale")
+            self.assertEqual(saved["stats"]["gp"], 5)
     def test_fresh_snapshots_skip_network_and_new_game_refreshes(self):
         with TemporaryDirectory() as tmp, patch.object(update, "DATA", Path(tmp)):
             with patch.object(update, "get", return_value=self.payload()):
