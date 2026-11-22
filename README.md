@@ -10,6 +10,7 @@ A small GitHub Pages dashboard for a next-morning NBA catch-up:
 - Bottom and contextual floating box-score close buttons, plus Escape support.
 - League, conference and division standings with team records, last ten, streak and points per game.
 - Inline player season averages beneath each clicked name, including DNP player disclosures and keyboard controls.
+- MVP Tracker with season averages and each selected player’s latest completed regular-season appearance.
 - Daily GitHub Actions updates and a permanent date-based archive.
 
 ## Website
@@ -41,6 +42,8 @@ The displayed figures are labelled season snapshots, not stats reconstructed as 
 The updater bootstraps archived player contexts using at most four concurrent requests. Subsequent runs refresh new appearances, retry missing data after a one-hour cooldown, and recheck current-season snapshots weekly for corrections. It rejects season GP counts behind completed archived appearances and preserves last-good data on failure. A valid first-time response without published season stats is a normal empty state, even for a player with archived appearances; it does not mark the daily update as failed. An unexpectedly empty response after previously published averages retains those figures as stale. Neither case produces fabricated zero averages. The browser supports local network retry, instant close/reopen, accessible expanded state, focus restoration and Escape. On mobile the inline panel stays visible while the enclosing box score pans.
 
 To protect the daily update during a provider outage, no new player requests start after a three-minute batch budget. Requests already in flight retain the existing bounded timeouts. Deferred contexts keep last-good figures or an explicit unavailable placeholder, and warning lists are capped to keep the archive manifest small.
+
+The MVP Tracker loads only when opened and reads `site/data/mvp.json`. The daily updater uses ESPN’s regular-season player game logs for season averages and each player’s most recent completed appearance, independent of the selected archive date. DNPs are skipped. A failed refresh retains only that player's last-good data from the same season and labels it as last saved. To change the watchlist, edit `MVP_PLAYERS` in `scripts/update.py`. Highlighted averages are category leaders within the watchlist, not award rankings.
 
 The updater merges existing data, retries HTTP failures, preserves previous box scores on failure, validates the output, commits changed JSON, and deploys the `site` directory with the official Pages Actions. A partial upstream outage still deploys the last available data but marks the workflow failed, rather than silently reporting success.
 

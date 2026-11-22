@@ -86,6 +86,7 @@ class TestUpdate(unittest.TestCase):
                                    days=7, skip_discovery=True, video_limit=20)
             with patch.object(update, "refresh_schedule", return_value=["Schedule offline"]) as schedule, \
                  patch.object(update, "refresh_standings", return_value=["Standings offline"]), \
+                 patch.object(update, "refresh_mvp", return_value=["MVP offline"]) as mvp, \
                  patch.object(update, "refresh_players", return_value=["Player offline"]), \
                  patch.object(update, "refresh_day", return_value=[]), \
                  patch.object(update, "read_feed", return_value=[]):
@@ -95,6 +96,9 @@ class TestUpdate(unittest.TestCase):
             index = update.load(Path(tmp) / "index.json")
             self.assertEqual(index["health"]["schedule"], "error")
             self.assertEqual(index["health"]["standings"], "error")
+            self.assertEqual(index["health"]["mvp"], "error")
+            today = dt.datetime.now(update.EASTERN).date()
+            mvp.assert_called_once_with(today.year + (today.month >= 10))
             self.assertEqual(index["health"]["players"], "error")
             self.assertEqual(index["health"]["scores"], "ok")
             self.assertEqual(index["health"]["videos"], "ok")
@@ -458,6 +462,63 @@ class TestPlayerSeasons(unittest.TestCase):
                 get.assert_not_called()
             self.assertIn("budget", failures[0])
             self.assertEqual(update.load(update.player_season_path(2027, 2, "1"))["status"], "unavailable")
+
+
+class TestMvpTracker(unittest.TestCase):
+    def payload(self):
+        events = {
+            str(i): {"gameDate": f"2026-11-{10+i}T01:00:00+00:00", "gameResult": "W",
+                     "team": {"abbreviation": "SA"}, "opponent": {"abbreviation": "NO"}, "atVs": "@"}
+            for i in range(1, 6)
+        }
+        events["4"]["gameResult"] = None
+        latest = ["31", "25", "4", "6", "2", "0"]
+        return {
+            "filters": [{"name": "season", "value": "2027"}],
+            "labels": ["MIN", *update.MVP_FIELDS],
+            "events": events,
+            "seasonTypes": [
+                {"displayName": "2026-27 Regular Season",
+                 "categories": [{"events": [
+                     {"eventId": "2", "stats": latest},
+                     {"eventId": "1", "stats": ["28", "15", "9", "0", "0", "2"]},
+                     {"eventId": "3", "stats": ["DNP"] * 6},
+                     {"eventId": "4", "stats": latest},
+                 ]}],
+                 "summary": {"stats": [{"type": "avg", "stats": ["29.5", "20", "6.5", "3", "1", "1"]},
+                                       {"type": "total", "stats": ["59", "40", "12", "6", "2", "2"]}]}},
+                {"displayName": "2026-27 Preseason",
+                 "categories": [{"events": [{"eventId": "5", "stats": latest}]}]},
+            ],
+        }
+
+    def test_latest_appearance_skips_dnp_unfinished_and_other_phases(self):
+        averages, game = update.mvp_lines(self.payload(), 2027)
+        self.assertEqual(averages, {"gp": 2, "PTS": 20, "REB": 6.5, "AST": 3, "STL": 1, "BLK": 1})
+        self.assertEqual((game["id"], game["date"], game["venue"]), ("2", "2026-11-11", "@"))
+        self.assertEqual(game["stats"], {"PTS": 25, "REB": 4, "AST": 6, "STL": 2, "BLK": 0})
+
+    def test_wrong_season_and_incomplete_appearance_log(self):
+        with self.assertRaisesRegex(ValueError, "Unexpected game log season"):
+            update.mvp_lines(self.payload(), 2026)
+        payload = self.payload()
+        payload["seasonTypes"][0]["categories"][0]["events"].pop(1)
+        with self.assertRaisesRegex(ValueError, "does not match"):
+            update.mvp_lines(payload, 2027)
+
+    def test_refresh_retains_last_good_per_player_but_never_across_seasons(self):
+        with TemporaryDirectory() as tmp, patch.object(update, "DATA", Path(tmp)):
+            path = Path(tmp) / "mvp.json"
+            with patch.object(update, "get", return_value=self.payload()):
+                self.assertEqual(update.refresh_mvp(2027), [])
+            old = update.load(path)["players"][0]
+            with patch.object(update, "get", side_effect=RuntimeError("offline")):
+                self.assertEqual(len(update.refresh_mvp(2027)), len(update.MVP_PLAYERS))
+                self.assertEqual(update.load(path)["players"][0], {**old, "status": "stale"})
+                self.assertEqual(len(update.refresh_mvp(2028)), len(update.MVP_PLAYERS))
+                fresh = update.load(path)["players"][0]
+                self.assertEqual(fresh["status"], "unavailable")
+                self.assertIsNone(fresh["last_game"])
 
 
 if __name__ == "__main__":

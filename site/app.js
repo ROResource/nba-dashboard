@@ -5,6 +5,7 @@ const safeURL = value => { try { const u = new URL(value); return u.protocol ===
 const state = {index:null, day:null, selected:null, hidden:false, team:"", request:0};
 const scheduleState = {data:null, pending:null, selected:null};
 const standingsState = {data:null,pending:null,view:"conference",groups:{conference:null,division:null}};
+const mvpState = {data:null,pending:null};
 let floatingBox = null;
 const playerCache = new Map();
 const playerSizes = new ResizeObserver(entries=>{
@@ -366,6 +367,58 @@ $("#standings-sort").onchange=renderStandings;
 $("#standings-search").oninput=renderStandings;
 $("#standings-results").addEventListener("click",e=>{if (e.target.closest("[data-retry-standings]")) loadStandings();});
 
+function renderMvp(data) {
+  const metrics=[["PTS","Points"],["REB","Rebounds"],["AST","Assists"],["STL","Steals"],["BLK","Blocks"]];
+  const fresh=data.players.filter(p=>p.status==="ok" && p.averages);
+  const leaders=Object.fromEntries(metrics.map(([key])=>[key,fresh.length>1?Math.max(...fresh.map(p=>p.averages[key])):null]));
+  const table=last=>{
+    const rows=data.players.map(p=>{
+      const game=p.last_game;
+      const stats=last?game?.stats:p.averages;
+      const box=game?`https://www.espn.com/nba/boxscore/_/gameId/${encodeURIComponent(game.id)}`:null;
+      const match=game?`${dateFormat(game.date,{day:"numeric",month:"short"})} · ${game.team} ${game.venue} ${game.opponent}`:"";
+      const statsPage=`https://www.espn.com/nba/player/stats/_/id/${encodeURIComponent(p.id)}`;
+      const name=last?escapeHTML(p.name):outbound(statsPage,escapeHTML(p.name));
+      const detail=last && game?`<small>${outbound(box,escapeHTML(match),"mvp-match")}</small>`:"";
+      const reason=p.status==="stale"?"Last saved":p.status==="no_stats"?"No games played":p.status==="unavailable"?"Unavailable":"";
+      return `<tr><th scope="row">${name}${detail}${reason?`<small class="mvp-row-note">${reason}</small>`:""}</th>`+
+        (last?"":`<td>${stats?.gp??"–"}</td>`)+metrics.map(([key])=>{
+          const lead=!last && p.status==="ok" && stats && stats[key]===leaders[key];
+          return `<td${lead?' class="mvp-leader"':""}>${stats?(last?stats[key]:stats[key].toFixed(1)):"–"}${lead?'<span class="sr-only">, leads tracked players with current data</span>':""}</td>`;
+        }).join("")+"</tr>";
+    }).join("");
+    return `<table class="mvp-table"><caption>${last?"Last game played":"Season averages"}</caption><thead><tr><th scope="col">Player</th>${last?"":'<th scope="col" title="Games played">GP</th>'}${metrics.map(([key,label])=>`<th scope="col" title="${label}">${key}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table>`;
+  };
+  const old=Date.now()-Date.parse(data.generated_at)>36*3600*1000;
+  const stamp=dateFormat(data.generated_at.slice(0,10),{day:"numeric",month:"short"});
+  $("#mvp-content").innerHTML=`<p class="mvp-note">${escapeHTML(data.season_label)} regular season · Saved ${escapeHTML(stamp)}${old?" · Snapshot may be out of date":""}</p>`+
+    `<div class="mvp-grid">${table(false)}${table(true)}</div>`+
+    `<p class="mvp-note mvp-footer">Orange marks the best current average among tracked players. Last game shows the most recent appearance, not a team’s latest game. Dates are US Eastern.</p>`;
+}
+async function loadMvp() {
+  if (state.hidden || mvpState.pending) return;
+  if (mvpState.data) return;
+  $("#mvp-content").innerHTML='<div class="loading">Loading player stats…</div>';
+  mvpState.pending=readJSON("./data/mvp.json");
+  try {
+    const data=await mvpState.pending;
+    if (data.schema_version!==1 || !Array.isArray(data.players) || !data.players.length) throw new Error("Invalid MVP tracker data");
+    renderMvp(data);
+    mvpState.data=data;
+  } catch {
+    $("#mvp-content").innerHTML='<div class="empty"><h3>MVP Tracker could not be loaded.</h3><p>The daily archive is still available below.</p><button type="button" data-retry-mvp>Try again</button></div>';
+  } finally {
+    mvpState.pending=null;
+  }
+}
+function syncMvpSpoilers() {
+  $("#mvp-spoilers").hidden=!state.hidden;
+  $("#mvp-content").hidden=state.hidden;
+  if (!state.hidden && $("#mvp").open) loadMvp();
+}
+$("#mvp").addEventListener("toggle",()=>{if ($("#mvp").open) syncMvpSpoilers();});
+$("#mvp-content").addEventListener("click",e=>{if (e.target.closest("[data-retry-mvp]")) loadMvp();});
+
 function renderTeamFilter() {
   const teams=[...new Map(state.day.games.flatMap(g=>[g.away,g.home]).map(t=>[t.id,t])).values()].sort((a,b)=>a.name.localeCompare(b.name));
   if (!teams.some(t=>t.id===state.team)) state.team="";
@@ -409,8 +462,9 @@ $("#spoilers").onclick=()=>{
   state.hidden=!state.hidden;
   $("#spoilers").setAttribute("aria-pressed",String(state.hidden));
   $("#spoilers").textContent=state.hidden?"Show scores":"Hide scores";
-  renderGames();
   syncStandingsSpoilers();
+  syncMvpSpoilers();
+  if (state.day) renderGames();
 };
 async function init() {
   try {

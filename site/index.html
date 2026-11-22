@@ -8,8 +8,8 @@
   <title>NBA Daily | The night, caught up.</title>
   <link rel="preconnect" href="https://api.fontshare.com">
   <link href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700,900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./style.css?v=20261031-players">
-  <script src="./app.js?v=20261031-players" defer></script>
+  <link rel="stylesheet" href="./style.css?v=20261122-mvp">
+  <script src="./app.js?v=20261122-mvp" defer></script>
 </head>
 <body>
   <a class="skip" href="#content">Skip to content</a>
@@ -55,6 +55,15 @@
             </div>
           </div>
           <div id="standings-results" aria-live="polite"><div class="loading">Loading standings…</div></div>
+        </div>
+      </details>
+    </section>
+    <section class="schedule-section" aria-label="MVP Tracker">
+      <details id="mvp">
+        <summary><span>MVP Tracker <small>Season averages · Last game</small></span></summary>
+        <div id="mvp-spoilers" class="standings-content muted" hidden>Player stats are hidden while scores are hidden.</div>
+        <div id="mvp-content" class="standings-content" aria-live="polite">
+          <div class="loading">Loading player stats…</div>
         </div>
       </details>
     </section>

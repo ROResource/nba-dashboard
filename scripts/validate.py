@@ -3,7 +3,7 @@ import json
 import re
 import datetime as dt
 import math
-from update import player_targets, player_season_path
+from update import MVP_FIELDS, MVP_PLAYERS, player_targets, player_season_path
 from pathlib import Path
 
 data = Path(__file__).resolve().parents[1] / "site" / "data"
@@ -130,3 +130,26 @@ for target in targets:
     player_count += 1
     player_statuses[player["status"]] = player_statuses.get(player["status"], 0) + 1
 print(f"Validated {player_count} player-season snapshots: {player_statuses}.")
+
+mvp = json.loads((data / "mvp.json").read_text())
+year = mvp["season_year"]
+assert mvp["schema_version"] == 1 and mvp["season_label"] == f"{year - 1}-{str(year)[-2:]}"
+assert dt.datetime.fromisoformat(mvp["generated_at"]).tzinfo
+assert [(p["id"], p["name"]) for p in mvp["players"]] == list(MVP_PLAYERS.items())
+for player in mvp["players"]:
+    assert player["status"] in ("ok", "stale", "no_stats", "unavailable")
+    averages, game = player["averages"], player["last_game"]
+    if player["checked_at"]:
+        assert dt.datetime.fromisoformat(player["checked_at"]).tzinfo
+    if player["status"] in ("ok", "stale"):
+        assert player["checked_at"]
+        assert type(averages["gp"]) is int and averages["gp"] > 0
+        assert re.fullmatch(r"\d+", game["id"])
+        assert dt.date(year - 1, 7, 1) <= dt.date.fromisoformat(game["date"]) < dt.date(year, 7, 1)
+        assert game["team"] and game["opponent"] and game["venue"] in ("@", "vs")
+        for key in MVP_FIELDS:
+            assert type(averages[key]) in (float, int) and math.isfinite(averages[key]) and averages[key] >= 0
+            assert type(game["stats"][key]) is int and game["stats"][key] >= 0
+    else:
+        assert averages is None and game is None
+print(f"Validated MVP tracker: {len(mvp['players'])} players.")

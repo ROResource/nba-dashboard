@@ -24,6 +24,15 @@ API = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba"
 STANDINGS_API = "https://site.api.espn.com/apis/v2/sports/basketball/nba/standings"
 PLAYER_API = "https://site.web.api.espn.com/apis/common/v3/sports/basketball/nba/athletes"
 PLAYER_REFRESH_SECONDS = 180
+MVP_PLAYERS = {
+    "5104157": "Victor Wembanyama",
+    "3945274": "Luka Dončić",
+    "4278073": "Shai Gilgeous-Alexander",
+    "3112335": "Nikola Jokić",
+    "3032977": "Giannis Antetokounmpo",
+}
+MVP_FIELDS = ("PTS", "REB", "AST", "STL", "BLK")
+EASTERN = ZoneInfo("America/New_York")
 LOG = logging.getLogger("update")
 NS = {"a": "http://www.w3.org/2005/Atom",
       "yt": "http://www.youtube.com/xml/schemas/2015",
@@ -582,6 +591,91 @@ def refresh_players(days):
     return failures if len(failures) <= 10 else failures[:10] + [f"{len(failures) - 10} additional player refresh failures"]
 
 
+def mvp_lines(payload, year):
+    """Use ESPN's regular-season averages and most recent completed appearance."""
+    label = f"{year - 1}-{str(year)[-2:]}"
+    if not any(f.get("name") == "season" and str(f.get("value")) == str(year)
+               for f in payload["filters"]):
+        raise ValueError("Unexpected game log season")
+    regular = next((s for s in payload["seasonTypes"]
+                    if s["displayName"] == f"{label} Regular Season"), None)
+    if regular is None:
+        return None, None
+    labels = payload["labels"]
+
+    def stats(values, cast, fields=MVP_FIELDS):
+        if len(values) != len(labels):
+            raise ValueError("Incomplete game log stat line")
+        row = dict(zip(labels, values))
+        result = {field: cast(row[field]) for field in fields}
+        if any(not math.isfinite(n) or n < 0 for n in result.values()):
+            raise ValueError("Invalid game log statistic")
+        return result
+
+    appearances = {}
+    for category in regular["categories"]:
+        for entry in category["events"]:
+            event_id = entry["eventId"]
+            event = payload["events"][event_id]
+            values = entry.get("stats") or []
+            if event.get("gameResult") not in ("W", "L") or not values:
+                continue
+            minutes = dict(zip(labels, values)).get("MIN")
+            if minutes in (None, "", "-", "--", "DNP"):
+                continue
+            start = dt.datetime.fromisoformat(event["gameDate"]).astimezone(EASTERN)
+            appearances[event_id] = (start, event, stats(values, int))
+    if not appearances and not regular["categories"]:
+        return None, None
+    summary = {row["type"]: row["stats"] for row in regular["summary"]["stats"]}
+    # Rebounds and other counting stats may receive corrections at different times.
+    # Use scoring totals as a completeness check, not to recalculate the averages.
+    total_points = stats(summary["total"], int, ("PTS",))["PTS"]
+    if not appearances or total_points != sum(row[2]["PTS"] for row in appearances.values()):
+        raise ValueError("Regular-season log does not match ESPN season totals")
+    averages = {"gp": len(appearances), **stats(summary["avg"], float)}
+    game_id, (start, event, line) = max(appearances.items(), key=lambda item: item[1][0])
+    if not re.fullmatch(r"\d+", game_id) or event["atVs"] not in ("@", "vs"):
+        raise ValueError("Invalid game log matchup")
+    return averages, {
+        "id": game_id, "date": start.date().isoformat(), "team": event["team"]["abbreviation"],
+        "opponent": event["opponent"]["abbreviation"], "venue": event["atVs"], "stats": line,
+    }
+
+
+def refresh_mvp(year):
+    path = DATA / "mvp.json"
+    previous = load(path, {})
+    saved = {p["id"]: p for p in previous.get("players", [])} if previous.get("season_year") == year else {}
+    checked = now()
+
+    def refresh(candidate):
+        player_id, name = candidate
+        row = {"id": player_id, "name": name}
+        old = saved.get(player_id, {})
+        try:
+            payload = get(f"{PLAYER_API}/{player_id}/gamelog?season={year}")
+            averages, last_game = mvp_lines(payload, year)
+            if old.get("last_game") and (not last_game
+                    or last_game["date"] < old["last_game"]["date"]
+                    or averages["gp"] < old["averages"]["gp"]):
+                raise ValueError("Provider returned an older game log")
+            return {**row, "averages": averages, "last_game": last_game, "checked_at": checked,
+                    "status": "ok" if last_game else "no_stats"}, None
+        except Exception as exc:
+            if old.get("last_game"):
+                return {**old, **row, "status": "stale"}, f"MVP tracker {name}: {exc}"
+            return {**row, "averages": None, "last_game": None, "checked_at": None,
+                    "status": "unavailable"}, f"MVP tracker {name}: {exc}"
+
+    with ThreadPoolExecutor(max_workers=5) as pool:
+        results = list(pool.map(refresh, MVP_PLAYERS.items()))
+    save(path, {"schema_version": 1, "generated_at": checked, "season_year": year,
+                "season_label": f"{year - 1}-{str(year)[-2:]}",
+                "players": [row for row, _ in results]})
+    return [problem for _, problem in results if problem]
+
+
 def run(args):
     DATA.mkdir(parents=True, exist_ok=True)
     (DATA / "days").mkdir(exist_ok=True)
@@ -596,6 +690,11 @@ def run(args):
     problems.extend(schedule_problems)
     standings_problems = refresh_standings()
     problems.extend(standings_problems)
+    # Use the provider's regular season, not the selected archive/backfill date.
+    standings = load(DATA / "standings.json", {})
+    fallback_year = today.year + (today.month >= 10)
+    mvp_problems = refresh_mvp((standings.get("season") or {}).get("year") or fallback_year)
+    problems.extend(mvp_problems)
     current = start
     while current <= end:
         day = current.isoformat()
@@ -665,6 +764,7 @@ def run(args):
                          "videos": "ok" if video_success else "error",
                          "schedule": "error" if schedule_problems else "ok",
                          "standings": "error" if standings_problems else "ok",
+                         "mvp": "error" if mvp_problems else "ok",
                          "players": "error" if player_problems else "ok",
                          "warnings": problems},
               "last_successful_scores_at": now() if score_success else previous_index.get("last_successful_scores_at"),

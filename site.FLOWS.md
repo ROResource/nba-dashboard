@@ -45,3 +45,10 @@
 - Escape first closes the focused player disclosure and returns focus to its name; a second Escape can close the box score. Existing bottom/floating close controls still work.
 - Mobile inline content stays within the visible table viewport while panning; vertical page scrolling, horizontal table scrolling, resize and sticky sizing remain usable.
 - Regression-check schedule, standings, filters, score hiding, archive/calendar, video/chapter controls, box closing and console errors. Workflow remains unchanged.
+
+## MVP Tracker acceptance checks
+
+- Open the collapsed MVP Tracker beside standings. Only opening it requests the static tracker file; reopening and switching archive editions reuse it.
+- See the five requested players in both tables. Compare season PTS, REB, AST, STL and BLK, with games played for context. Highlights are category leads, not an MVP ranking.
+- Last game is the latest completed regular-season appearance, with Eastern date, team, opponent and an ESPN box-score link. DNPs and preseason do not replace it.
+- Check both tables at 1440px and 375px; also exercise a failed request and retry, and opening the tracker with scores hidden.
