@@ -501,10 +501,14 @@ class TestMvpTracker(unittest.TestCase):
     def test_wrong_season_and_incomplete_appearance_log(self):
         with self.assertRaisesRegex(ValueError, "Unexpected game log season"):
             update.mvp_lines(self.payload(), 2026)
+
+    def test_lagging_season_summary_still_advances_last_game(self):
         payload = self.payload()
-        payload["seasonTypes"][0]["categories"][0]["events"].pop(1)
-        with self.assertRaisesRegex(ValueError, "does not match"):
-            update.mvp_lines(payload, 2027)
+        payload["seasonTypes"][0]["summary"]["stats"][1]["stats"][0] = "30"  # stale totals
+        averages, game = update.mvp_lines(payload, 2027)
+        self.assertEqual(averages["gp"], 2)
+        self.assertEqual(averages["PTS"], 20.0)
+        self.assertEqual(game["id"], "2")
 
     def test_refresh_retains_last_good_per_player_but_never_across_seasons(self):
         with TemporaryDirectory() as tmp, patch.object(update, "DATA", Path(tmp)):

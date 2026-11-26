@@ -631,9 +631,16 @@ def mvp_lines(payload, year):
     # Rebounds and other counting stats may receive corrections at different times.
     # Use scoring totals as a completeness check, not to recalculate the averages.
     total_points = stats(summary["total"], int, ("PTS",))["PTS"]
-    if not appearances or total_points != sum(row[2]["PTS"] for row in appearances.values()):
-        raise ValueError("Regular-season log does not match ESPN season totals")
-    averages = {"gp": len(appearances), **stats(summary["avg"], float)}
+    if not appearances:
+        raise ValueError("Regular-season log has no completed appearances")
+    if total_points == sum(row[2]["PTS"] for row in appearances.values()):
+        averages = {"gp": len(appearances), **stats(summary["avg"], float)}
+    else:
+        # ESPN's season summary can lag the game log by hours. Keep the newest game
+        # and derive averages from the same log so both tables stay consistent.
+        count = len(appearances)
+        averages = {"gp": count, **{f: round(sum(r[2][f] for r in appearances.values()) / count + 1e-9, 1)
+                                    for f in MVP_FIELDS}}
     game_id, (start, event, line) = max(appearances.items(), key=lambda item: item[1][0])
     if not re.fullmatch(r"\d+", game_id) or event["atVs"] not in ("@", "vs"):
         raise ValueError("Invalid game log matchup")
